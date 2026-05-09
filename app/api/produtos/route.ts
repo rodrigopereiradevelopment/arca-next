@@ -1,10 +1,15 @@
+// app/api/produtos/route.ts
 import { NextRequest, NextResponse } from "next/server";
+import { getMongoDb } from "@/lib/db/mongodb";
+import { getSupabaseServerClient } from "@/lib/db/supabase";
 import {
   listProductsFromSupabase,
   normalizeLimit,
   saveRawProductInMongo,
+  saveProductInSupabase,
 } from "@/lib/services/products-service";
 
+// GET: Buscar produtos do Supabase (para o app)
 export async function GET(req: NextRequest) {
   try {
     const limit = normalizeLimit(req.nextUrl.searchParams.get("limit"), 20);
@@ -21,12 +26,13 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// POST: Salvar produto bruto no MongoDB (vindo do app/usuário)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     if (!body?.nome || typeof body.nome !== "string") {
       return NextResponse.json(
-        { ok: false, error: "Campo 'nome' e obrigatorio." },
+        { ok: false, error: "Campo 'nome' é obrigatório." },
         { status: 400 }
       );
     }
@@ -47,8 +53,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error:
-          error instanceof Error ? error.message : "Erro ao salvar produto bruto",
+        error: error instanceof Error ? error.message : "Erro ao salvar produto bruto",
       },
       { status: 500 }
     );
