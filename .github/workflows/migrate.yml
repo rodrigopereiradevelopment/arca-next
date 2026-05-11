@@ -1,0 +1,62 @@
+name: 🚀 Rodar Migração ARCA
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Tipo de execução'
+        required: true
+        default: 'sync'
+        type: choice
+        options:
+          - sync
+          - full_sync
+      batchSize:
+        description: 'Tamanho do lote (sync ignora)'
+        required: false
+        default: '250'
+        type: string
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout do código
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Instalar dependências
+        run: npm ci
+
+      - name: 🔨 Build do Next.js
+        run: npm run build
+
+      - name: 🚀 Executar migração
+        run: |
+          node -e "
+          const { migrateProductsToSupabase, syncUpdatedPrices } = require('./lib/services/migration-service');
+          
+          (async () => {
+            console.log('🔄 Iniciando migração...');
+            console.log('   Action: ${{ inputs.action }}');
+            console.log('   BatchSize: ${{ inputs.batchSize }}');
+            
+            if ('${{ inputs.action }}' === 'sync') {
+              const result = await syncUpdatedPrices();
+              console.log('✅ Sync concluído:', result);
+            } else {
+              const result = await migrateProductsToSupabase(parseInt('${{ inputs.batchSize }}'));
+              console.log('✅ Migração concluída:', result);
+            }
+          })();
+          "
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          MONGODB_DB_NAME: ${{ secrets.MONGODB_DB_NAME }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
