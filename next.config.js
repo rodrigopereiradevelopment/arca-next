@@ -1,6 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Mantém a sua configuração do webpack se precisar dela no futuro...
   webpack: (config) => config,
+  
+  // ...e adicionamos isso aqui para silenciar o erro do Turbopack
+  turbopack: {}, 
+
   async headers() {
     return [
       {
