@@ -16,7 +16,7 @@ const SUPERMERCADOS: Record<MercadoId, string> = {
 const MERCADOS_IDS: MercadoId[] = [1, 2, 3, 4, 5, 6];
 
 // Preço máximo considerado razoável (evita produtos errados como equipamentos)
-const PRECO_MAXIMO_RAZOAVEL = 50;
+const PRECO_MAXIMO_RAZOAVEL = 500;
 
 interface ProdutoItem {
   id?: number;
@@ -76,34 +76,35 @@ export async function POST(req: NextRequest) {
         }
       }
       
-      // 2. Se não achou, busca similar por nome (com limite de preço)
+      // 2. Se não achou, busca similar POR MERCADO (não um único produto global)
       if (precosEncontrados.length === 0) {
-        console.log(`    🔍 Buscando similar para: ${produto.nome}`);
-        
-        // Busca produtos com nome similar
+        const palavras = produto.nome.split(" ").slice(0, 2).join(" ");
         const { data: similares } = await supabase
           .from("produtos")
           .select("id, nome")
-          .ilike("nome", `%${produto.nome.split(" ")[0]}%`)
-          .limit(10);
-        
+          .ilike("nome_normalizado", `%${palavras.toLowerCase()}%`)
+          .limit(20);  // mais candidatos
+
         if (similares && similares.length > 0) {
-          // Para cada similar, busca preços
-          for (const similar of similares) {
-            const { data: precosSimilar } = await supabase
-              .from("precos")
-              .select("preco, supermercado_id")
-              .eq("produto_id", similar.id)
-              .in("supermercado_id", MERCADOS_IDS)
-              .order("data_coleta", { ascending: false });
-            
-            if (precosSimilar && precosSimilar.length > 0) {
-              // Verifica se tem preços razoáveis
-              const precoMinimo = Math.min(...precosSimilar.map(p => p.preco));
-              if (precoMinimo > 0 && precoMinimo < PRECO_MAXIMO_RAZOAVEL) {
-                precosEncontrados = precosSimilar;
-                console.log(`    ✅ Achou similar: ${similar.nome} (R$ ${precoMinimo})`);
-                break;
+          const ids = similares.map(s => s.id);
+
+          // Busca preços de TODOS os similares de uma vez
+          const { data: todosPrecoss } = await supabase
+            .from("precos")
+            .select("preco, supermercado_id, produto_id")
+            .in("produto_id", ids)
+            .in("supermercado_id", MERCADOS_IDS)
+            .order("data_coleta", { ascending: false });
+
+          if (todosPrecoss) {
+            // Para cada mercado, pega o menor preço entre todos os similares
+            for (const mercadoId of MERCADOS_IDS) {
+              const precosMercado = todosPrecoss
+                .filter(p => p.supermercado_id === mercadoId && p.preco > 0 && p.preco < PRECO_MAXIMO_RAZOAVEL)
+                .sort((a, b) => a.preco - b.preco);
+
+              if (precosMercado.length > 0) {
+                precosEncontrados.push(precosMercado[0]);
               }
             }
           }
