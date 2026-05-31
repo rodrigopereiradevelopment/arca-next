@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/db/supabase";
 
-// Definindo o tipo dos mercados
 type MercadoId = 1 | 2 | 3 | 4 | 5 | 6;
 
 const SUPERMERCADOS: Record<MercadoId, string> = {
@@ -14,9 +13,6 @@ const SUPERMERCADOS: Record<MercadoId, string> = {
 };
 
 const MERCADOS_IDS: MercadoId[] = [1, 2, 3, 4, 5, 6];
-
-// Preço máximo considerado razoável (evita produtos errados como equipamentos)
-const PRECO_MAXIMO_RAZOAVEL = 500;
 
 interface ProdutoItem {
   id?: number;
@@ -42,10 +38,10 @@ interface RespostaMercado {
 export async function POST(req: NextRequest) {
   try {
     const { produtos } = await req.json() as { produtos: ProdutoItem[] };
-    
     console.log(`🔍 Comparando ${produtos.length} produtos...`);
-    
+
     const supabase = getSupabaseServerClient();
+
     const resultadosPorMercado: Record<MercadoId, ResultadoMercado> = {
       1: { total: 0, itens: 0, produtos: [] },
       2: { total: 0, itens: 0, produtos: [] },
@@ -54,93 +50,68 @@ export async function POST(req: NextRequest) {
       5: { total: 0, itens: 0, produtos: [] },
       6: { total: 0, itens: 0, produtos: [] }
     };
-    
-    // Para cada produto, busca o melhor preço em cada mercado
+
     for (const produto of produtos) {
-      console.log(`  📦 Processando: ${produto.nome} (qtd: ${produto.quantidade})`);
-      
-      let precosEncontrados: any[] = [];
-      
-      // 1. Tenta preço exato por ID (se tiver ID)
-      if (produto.id) {
-        const { data: precos } = await supabase
-          .from("precos")
-          .select("preco, supermercado_id")
-          .eq("produto_id", produto.id)
-          .in("supermercado_id", MERCADOS_IDS)
-          .order("data_coleta", { ascending: false });
-        
-        if (precos && precos.length > 0) {
-          precosEncontrados = precos;
-          console.log(`    ✅ Achou por ID: ${produto.id}`);
-        }
-      }
-      
-      // 2. Se não achou, busca similar POR MERCADO (não um único produto global)
-      if (precosEncontrados.length === 0) {
-        const palavras = produto.nome.split(" ").slice(0, 2).join(" ");
-        const { data: similares } = await supabase
-          .from("produtos")
-          .select("id, nome")
-          .ilike("nome_normalizado", `%${palavras.toLowerCase()}%`)
-          .limit(20);  // mais candidatos
+      console.log(`\n📦 Processando: ${produto.nome} (qtd: ${produto.quantidade})`);
 
-        if (similares && similares.length > 0) {
-          const ids = similares.map(s => s.id);
+      // Para cada mercado, chama a RPC buscar_melhor_preco
+      // Roda todos os mercados em paralelo (mais rápido!)
+      const resultados = await Promise.all(
+        MERCADOS_IDS.map(async (mercadoId) => {
+          try {
+            const { data, error } = await supabase.rpc('buscar_melhor_preco', {
+              p_produto_id: produto.id ?? null,
+              p_nome: produto.nome,
+              p_mercado_id: mercadoId,
+              p_dias_max: 30
+            });
 
-          // Busca preços de TODOS os similares de uma vez
-          const { data: todosPrecoss } = await supabase
-            .from("precos")
-            .select("preco, supermercado_id, produto_id")
-            .in("produto_id", ids)
-            .in("supermercado_id", MERCADOS_IDS)
-            .order("data_coleta", { ascending: false });
+            console.log(`  🔎 Mercado ${mercadoId} raw:`, JSON.stringify({ data, error }));
 
-          if (todosPrecoss) {
-            // Para cada mercado, pega o menor preço entre todos os similares
-            for (const mercadoId of MERCADOS_IDS) {
-              const precosMercado = todosPrecoss
-                .filter(p => p.supermercado_id === mercadoId && p.preco > 0 && p.preco < PRECO_MAXIMO_RAZOAVEL)
-                .sort((a, b) => a.preco - b.preco);
-
-              if (precosMercado.length > 0) {
-                precosEncontrados.push(precosMercado[0]);
-              }
+            if (error || !data || data.length === 0) {
+              console.log(`  ❌ Mercado ${mercadoId} (${SUPERMERCADOS[mercadoId]}): não encontrado`);
+              return { mercadoId, preco: 0, nomeUsado: null, tipoBusca: null };
             }
+
+            const resultado = data[0];
+            console.log(`  ✅ Mercado ${mercadoId} (${SUPERMERCADOS[mercadoId]}): R$ ${resultado.preco} | ${resultado.tipo_busca} | ${resultado.nome_usado}`);
+
+            return {
+              mercadoId,
+              preco: resultado.preco,
+              nomeUsado: resultado.nome_usado,
+              tipoBusca: resultado.tipo_busca
+            };
+          } catch (err) {
+            console.error(`  ❌ Erro mercado ${mercadoId}:`, err);
+            return { mercadoId, preco: 0, nomeUsado: null, tipoBusca: null };
           }
-        }
-      }
-      
-      // 3. Agrupa preços por mercado (pega o mais recente/menor)
-      const precosPorMercado: Partial<Record<MercadoId, number>> = {};
-      if (precosEncontrados.length > 0) {
-        for (const p of precosEncontrados) {
-          const mercadoId = p.supermercado_id as MercadoId;
-          const precoAtual = precosPorMercado[mercadoId];
-          if (!precoAtual || p.preco < precoAtual) {
-            precosPorMercado[mercadoId] = p.preco;
-          }
-        }
-      }
-      
-      // 4. Acumula totais por mercado
-      for (const mercadoId of MERCADOS_IDS) {
-        const preco = precosPorMercado[mercadoId] || 0;
+        })
+      );
+
+      // Acumula resultados por mercado
+      for (const resultado of resultados) {
+        const { mercadoId, preco, nomeUsado, tipoBusca } = resultado;
         const quantidade = produto.quantidade || 1;
-        
-        if (preco > 0 && preco < PRECO_MAXIMO_RAZOAVEL) {
+
+        if (preco > 0) {
           resultadosPorMercado[mercadoId].total += preco * quantidade;
           resultadosPorMercado[mercadoId].itens++;
           resultadosPorMercado[mercadoId].produtos.push({
             nome: produto.nome,
-            quantidade: quantidade,
+            nomeEncontrado: nomeUsado,
+            tipoBusca,
+            quantidade,
             precoUnitario: preco,
-            subtotal: preco * quantidade
+            subtotal: preco * quantidade,
+            naoEncontrado: false
           });
         } else {
           resultadosPorMercado[mercadoId].produtos.push({
             nome: produto.nome,
-            quantidade: quantidade,
+            nomeEncontrado: null,
+            tipoBusca: null,
+            quantidade,
             precoUnitario: 0,
             subtotal: 0,
             naoEncontrado: true
@@ -148,27 +119,32 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-    
-    // Formata resposta
+
+    // Monta resposta final
     const resposta: RespostaMercado[] = MERCADOS_IDS.map((id) => ({
-      id: id,
+      id,
       nome: SUPERMERCADOS[id],
       total: resultadosPorMercado[id].total,
       itensEncontrados: resultadosPorMercado[id].itens,
       totalProdutos: produtos.length,
       produtos: resultadosPorMercado[id].produtos
     }));
-    
-    resposta.sort((a, b) => a.total - b.total);
-    
-    console.log(`✅ Comparação finalizada. Top mercado: ${resposta[0]?.nome} (R$ ${resposta[0]?.total})`);
-    
+
+    // Ordena por menor preço (sem dados vai pro fim)
+    resposta.sort((a, b) => {
+      if (a.total === 0) return 1;
+      if (b.total === 0) return -1;
+      return a.total - b.total;
+    });
+
+    console.log(`\n✅ Top mercado: ${resposta[0]?.nome} (R$ ${resposta[0]?.total.toFixed(2)})`);
+
     return NextResponse.json({
       sucesso: true,
       mercados: resposta,
       totalProdutos: produtos.length
     });
-    
+
   } catch (error) {
     console.error("❌ Erro no comparador:", error);
     return NextResponse.json(
