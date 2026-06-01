@@ -4,10 +4,23 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+# arca-next — API Backend
+
+```bash
+npm run dev          # Usa --webpack (NÃO turbopack)
+npm run build        # Build de produção
+```
+
+- App Router em `app/api/**/route.ts`
+- Exige `.env.local` com: `MONGODB_URI`, `MONGODB_DB_NAME`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `SYNC_SECRET`
+- Endpoints: `/api/produtos/search`, `/api/produtos/preco`, `/api/produtos/preco-similar`, `/api/auth/*`, `/api/chat`, `/api/health`
+- Deploy automático na Vercel via `git push`
+- Sem infra de testes configurada
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **arca-next** (101 symbols, 132 relationships, 4 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **arca-next** (277 symbols, 410 relationships, 15 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
