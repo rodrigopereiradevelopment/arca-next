@@ -1,14 +1,15 @@
 # 🚀 ARCA Next — API Backend
 
 [![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?logo=vercel)](https://arca-next.vercel.app)
-[![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green?logo=supabase)](https://supabase.com)
+[![Prisma](https://img.shields.io/badge/Prisma-7-gray?logo=prisma)](https://www.prisma.io/)
 
-API backend do ecossistema **ARCA** — ponte entre o banco de dados (Supabase/MongoDB) e o aplicativo mobile.
+API backend do ecossistema **ARCA** — ponte entre o banco de dados (Supabase/MongoDB) e o aplicativo mobile. Gerencia catálogo de produtos, preços, mercados, usuários e autenticação.
 
-> 🔗 **App Mobile:** [arca-ionic](https://github.com/rodrigopereiradevelopment/arca-ionic)  
-> 🕷️ **Scraper:** [arca-scraper](https://github.com/rodrigopereiradevelopment/arca-scraper)  
+> 🔗 **App Mobile:** [arca-ionic](https://github.com/rodrigopereiradevelopment/arca-ionic)
+> 🕷️ **Scraper:** [arca-scraper](https://github.com/rodrigopereiradevelopment/arca-scraper)
 > 🌐 **Produção:** https://arca-next.vercel.app
 
 ---
@@ -25,6 +26,10 @@ MongoDB Atlas (Bronze) → ETL → Supabase PostgreSQL (Gold)
                               arca-ionic (App Mobile)
 ```
 
+- **Prisma ORM v7** configurado com schema completo (`Produto`, `Categoria`, `Supermercado`, `Preco`, `Perfil`)
+- Singleton com `@prisma/adapter-pg` + `pg`
+- **Rotas usam Supabase HTTP** (porta PostgreSQL bloqueada na rede local) — Prisma preservado para eventual deploy Vercel
+
 ---
 
 ## 📡 Endpoints da API
@@ -33,9 +38,30 @@ MongoDB Atlas (Bronze) → ETL → Supabase PostgreSQL (Gold)
 
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
+| `GET` | `/api/produtos` | Lista produtos (paginado, busca, filtro categoria) |
+| `POST` | `/api/produtos` | Cria produto (auth admin/moderador) |
+| `PUT` | `/api/produtos` | Atualiza produto (auth admin/moderador) |
+| `DELETE` | `/api/produtos` | Soft delete (auth admin/moderador) |
+| `GET` | `/api/produtos/precos` | Lista preços por produto ou 20 mais recentes |
 | `GET` | `/api/produtos/search?q={termo}` | Busca fuzzy por nome (pg_trgm) |
-| `GET` | `/api/produtos/preco?produtoId={id}&mercadoId={id}` | Preço exato do produto no mercado |
-| `GET` | `/api/produtos/preco-similar?nome={nome}&mercadoId={id}` | Busca por similaridade de nome (fallback) |
+
+### Categorias
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| `GET` | `/api/categorias` | Lista todas as categorias |
+| `POST` | `/api/categorias` | Cria categoria (auth admin/moderador) |
+| `PUT` | `/api/categorias` | Atualiza categoria (auth admin/moderador) |
+| `DELETE` | `/api/categorias` | Exclui categoria (auth admin/moderador) |
+
+### Mercados
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| `GET` | `/api/mercados` | Lista mercados |
+| `POST` | `/api/mercados` | Cria mercado com geocoding (Nominatim) |
+| `PUT` | `/api/mercados` | Atualiza mercado |
+| `DELETE` | `/api/mercados` | Exclui mercado (apenas admin) |
 
 ### Auth
 
@@ -58,11 +84,11 @@ MongoDB Atlas (Bronze) → ETL → Supabase PostgreSQL (Gold)
 # Busca fuzzy
 curl https://arca-next.vercel.app/api/produtos/search?q=arroz
 
-# Preço exato
-curl https://arca-next.vercel.app/api/produtos/preco?produtoId=189080&mercadoId=1
+# Lista produtos (paginado, com filtro)
+curl "https://arca-next.vercel.app/api/produtos?page=1&limit=20&busca=arroz&categoria_id=5"
 
-# Preço por similaridade de nome
-curl https://arca-next.vercel.app/api/produtos/preco-similar?nome=acucar+uniao&mercadoId=1
+# Preços de um produto
+curl "https://arca-next.vercel.app/api/produtos/precos?produto_id=189080"
 
 # Status da API
 curl https://arca-next.vercel.app/api/health
@@ -91,12 +117,15 @@ SUPABASE_SERVICE_ROLE_KEY=sua_service_role_key
 
 GEMINI_API_KEY=sua_chave_gemini
 SYNC_SECRET=seu_secret
+DATABASE_URL=postgresql://...
 ```
 
 ```bash
 npm run dev
 # http://localhost:3000
 ```
+
+> ⚠️ Use `npm run dev` (--webpack), **não** turbopack.
 
 ---
 
@@ -114,10 +143,11 @@ Principais tabelas:
 
 | Tabela | Descrição |
 |--------|-----------|
-| `produtos` | Catálogo com ~57.000 produtos |
+| `produtos` | Catálogo com ~57.000 produtos (inclui categorias e upload de imagem) |
+| `categorias` | Categorias de produtos (FK em produtos) |
 | `precos` | Histórico de preços por mercado |
-| `supermercados` | 6 mercados com coordenadas reais |
-| `perfis` | Usuários e permissões |
+| `supermercados` | 6 mercados com coordenadas reais, status e logo |
+| `perfis` | Usuários, permissões (admin, moderador, usuario) |
 
 **Extensão pg_trgm** habilitada para busca fuzzy:
 
@@ -142,15 +172,22 @@ arca-next/
 │       │   ├── cadastro/route.ts
 │       │   └── logout/route.ts
 │       ├── produtos/
+│       │   ├── route.ts              # CRUD + paginação + busca
+│       │   ├── precos/route.ts       # Preços por produto ou recentes
 │       │   ├── search/route.ts       # Busca fuzzy
-│       │   ├── preco/route.ts        # Preço exato
-│       │   └── preco-similar/route.ts # Fallback similar
+│       │   └── preco-similar/route.ts
+│       ├── categorias/route.ts       # CRUD categorias
+│       ├── mercados/route.ts         # CRUD mercados + geocoding
 │       ├── chat/route.ts             # Assistente IA
 │       └── health/route.ts
 ├── lib/
 │   └── db/
 │       ├── mongodb.ts
-│       └── supabase.ts
+│       ├── supabase.ts              # getSupabaseServerClient()
+│       └── prisma.ts                # Singleton Prisma (não usado no runtime)
+├── prisma/
+│   └── schema.prisma                # Schema completo (Prisma ORM v7)
+├── prisma.config.ts                 # Config do Prisma adapter
 └── .env.local
 ```
 
@@ -160,13 +197,24 @@ arca-next/
 
 | Tecnologia | Uso |
 |------------|-----|
-| Next.js 15 | Framework (App Router) |
+| Next.js 16 | Framework (App Router, --webpack) |
 | TypeScript | Linguagem |
-| Supabase | PostgreSQL + Auth |
+| Supabase | PostgreSQL + Auth via HTTP |
+| Prisma ORM 7 | Schema + migrations (preservado) |
 | MongoDB | Dados brutos (Bronze) |
 | pg_trgm | Busca fuzzy |
 | Google Gemini | Assistente IA |
+| Nominatim | Geocoding de mercados |
 | Vercel | Deploy e hospedagem |
+
+---
+
+## 🔐 Autenticação
+
+- **Admin/Moderador**: Token via `Authorization: Bearer` + body fallback
+- `isAdminOrModerador()` — verifica role no Supabase
+- CORS com OPTIONS explícito para PUT/DELETE
+- Token armazenado em localStorage (`arca_usuario`)
 
 ---
 
