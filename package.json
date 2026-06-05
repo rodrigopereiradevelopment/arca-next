@@ -4,20 +4,17 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
-    "build": "prisma generate && next build",
+    "build": "next build",
     "start": "next start"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.4",
     "@capacitor/core": "^8.3.4",
-    "@prisma/adapter-pg": "^7.8.0",
-    "@prisma/client": "^7.8.0",
     "@supabase/supabase-js": "^2.100.1",
     "dotenv": "^17.4.2",
     "mongodb": "^7.1.1",
     "next": "16.2.1",
     "pg": "^8.21.0",
-    "prisma": "^7.8.0",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },

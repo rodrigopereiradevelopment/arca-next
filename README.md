@@ -4,8 +4,6 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green?logo=supabase)](https://supabase.com)
-[![Prisma](https://img.shields.io/badge/Prisma-7-gray?logo=prisma)](https://www.prisma.io/)
-
 API backend do ecossistema **ARCA** — ponte entre o banco de dados (Supabase/MongoDB) e o aplicativo mobile. Gerencia catálogo de produtos, preços, mercados, usuários e autenticação.
 
 > 🔗 **App Mobile:** [arca-ionic](https://github.com/rodrigopereiradevelopment/arca-ionic)
@@ -26,9 +24,7 @@ MongoDB Atlas (Bronze) → ETL → Supabase PostgreSQL (Gold)
                               arca-ionic (App Mobile)
 ```
 
-- **Prisma ORM v7** configurado com schema completo (`Produto`, `Categoria`, `Supermercado`, `Preco`, `Perfil`)
-- Singleton com `@prisma/adapter-pg` + `pg`
-- **Rotas usam Supabase HTTP** (porta PostgreSQL bloqueada na rede local) — Prisma preservado para eventual deploy Vercel
+- **Supabase HTTP** — todas as rotas usam `getSupabaseServerClient()` diretamente
 
 ---
 
@@ -183,11 +179,7 @@ arca-next/
 ├── lib/
 │   └── db/
 │       ├── mongodb.ts
-│       ├── supabase.ts              # getSupabaseServerClient()
-│       └── prisma.ts                # Singleton Prisma (não usado no runtime)
-├── prisma/
-│   └── schema.prisma                # Schema completo (Prisma ORM v7)
-├── prisma.config.ts                 # Config do Prisma adapter
+│       └── supabase.ts              # getSupabaseServerClient()
 └── .env.local
 ```
 
@@ -200,7 +192,7 @@ arca-next/
 | Next.js 16 | Framework (App Router, --webpack) |
 | TypeScript | Linguagem |
 | Supabase | PostgreSQL + Auth via HTTP |
-| Prisma ORM 7 | Schema + migrations (preservado) |
+
 | MongoDB | Dados brutos (Bronze) |
 | pg_trgm | Busca fuzzy |
 | Google Gemini | Assistente IA |
