@@ -12,7 +12,9 @@ npm run build        # Build de produção
 ```
 
 - App Router em `app/api/**/route.ts`
-- Exige `.env.local` com: `MONGODB_URI`, `MONGODB_DB_NAME`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `SYNC_SECRET`
+- **Prisma ORM v7** — `prisma/schema.prisma` (models Produto, Categoria), config em `prisma.config.ts`, driver adapter `@prisma/adapter-pg` + `pg`
+- Exige `.env.local` com: `MONGODB_URI`, `MONGODB_DB_NAME`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `SYNC_SECRET`, `DATABASE_URL`
+- Singleton Prisma em `lib/db/prisma.ts` (global caching, query logging em dev)
 - Endpoints: `/api/produtos/search`, `/api/produtos/preco`, `/api/produtos/preco-similar`, `/api/auth/*`, `/api/chat`, `/api/health`
 - Deploy automático na Vercel via `git push`
 - Sem infra de testes configurada
@@ -20,7 +22,7 @@ npm run build        # Build de produção
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **arca-next** (277 symbols, 410 relationships, 15 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **arca-next** (312 symbols, 488 relationships, 17 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

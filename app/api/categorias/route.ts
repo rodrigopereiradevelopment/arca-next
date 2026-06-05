@@ -35,74 +35,34 @@ async function isAdminOrModerador(token: string): Promise<boolean> {
   }
 }
 
-function paraFront(p: any) {
-  return {
-    id: p.id,
-    nome: p.nome,
-    descricao: p.descricao || "",
-    marca: p.marca || "",
-    ean: p.codigo_barras || "",
-    categoria: "",
-    categoria_id: p.categoria_id,
-    imagem_url: p.imagem_url || "",
-    ativo: p.ativo,
-    tipo: p.tipo || "industrializado",
-    peso_volume: p.peso_volume || "",
-    precosAtivos: 0,
-    created_at: p.created_at,
-  };
-}
-
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
     const supabase = getSupabaseServerClient();
-    const { searchParams } = req.nextUrl;
-    const busca = searchParams.get("busca");
-    const ativo = searchParams.get("ativo");
-    const categoria_id = searchParams.get("categoria_id");
-    const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
-    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "20")));
-    const from = (page - 1) * limit;
-    const to = from + limit - 1;
-
-    let query = supabase
-      .from("produtos")
-      .select("*", { count: "exact" });
-
-    if (ativo !== "todos") {
-      query = query.eq("ativo", ativo !== "false");
-    }
-
-    if (categoria_id) {
-      query = query.eq("categoria_id", parseInt(categoria_id));
-    }
-
-    if (busca) {
-      query = query.or(
-        `nome.ilike.%${busca}%,codigo_barras.ilike.%${busca}%`
-      );
-    }
-
-    const { data, error, count } = await query
-      .order("created_at", { ascending: false })
-      .range(from, to);
+    const { data, error } = await supabase
+      .from("categorias")
+      .select("*")
+      .eq("ativo", true)
+      .order("nome", { ascending: true });
 
     if (error) throw error;
 
-    return corsOk({
-      data: (data ?? []).map(paraFront),
-      total: count ?? 0,
-      page,
-      limit,
-    });
+    return corsOk(
+      (data ?? []).map((c: any) => ({
+        id: c.id,
+        nome: c.nome,
+        descricao: c.descricao || "",
+        icone: c.icone || "",
+        totalProdutos: 0,
+      }))
+    );
   } catch (error) {
-    console.error("[produtos] GET error:", error);
+    console.error("[categorias] GET error:", error);
     return corsErr(
-      error instanceof Error ? error.message : "Erro ao listar produtos",
+      error instanceof Error ? error.message : "Erro ao listar categorias",
       500
     );
   }
@@ -115,35 +75,36 @@ export async function POST(req: NextRequest) {
     if (!token) return corsErr("Token obrigatório", 401);
     if (!(await isAdminOrModerador(token))) return corsErr("Sem permissão", 403);
 
-    const { token: _t, id: _i, ean, ...rest } = body;
+    const { token: _t, id: _i, ...rest } = body;
 
-    if (!rest.nome) return corsErr("Nome é obrigatório", 400);
-
-    const insertData: Record<string, any> = {
-      nome: rest.nome,
-      descricao: rest.descricao || null,
-      marca: rest.marca || null,
-      codigo_barras: ean || rest.ean || rest.codigo_barras || null,
-      imagem_url: rest.imagem_url || null,
-      tipo: rest.tipo || "industrializado",
-      peso_volume: rest.peso_volume || null,
-      categoria_id: rest.categoria_id || null,
-    };
+    if (!rest.nome || !rest.nome.trim()) {
+      return corsErr("Nome é obrigatório", 400);
+    }
 
     const supabase = getSupabaseServerClient();
     const { data, error } = await supabase
-      .from("produtos")
-      .insert(insertData)
-      .select("*")
+      .from("categorias")
+      .insert({
+        nome: rest.nome.trim(),
+        descricao: rest.descricao || null,
+        icone: rest.icone || null,
+      })
+      .select()
       .single();
 
     if (error) throw error;
 
-    return corsOk(paraFront(data));
+    return corsOk({
+      id: data.id,
+      nome: data.nome,
+      descricao: data.descricao || "",
+      icone: data.icone || "",
+      totalProdutos: 0,
+    });
   } catch (error) {
-    console.error("[produtos] POST error:", error);
+    console.error("[categorias] POST error:", error);
     return corsErr(
-      error instanceof Error ? error.message : "Erro ao criar produto",
+      error instanceof Error ? error.message : "Erro ao criar categoria",
       500
     );
   }
@@ -157,19 +118,12 @@ export async function PUT(req: NextRequest) {
     if (!token || !id) return corsErr("Token e id obrigatórios", 400);
     if (!(await isAdminOrModerador(token))) return corsErr("Sem permissão", 403);
 
-    const { token: _t, id: _i, ean, ...rest } = body;
+    const { token: _t, id: _i, ...rest } = body;
 
     const updateData: Record<string, any> = {};
-    const campos = [
-      "nome", "descricao", "marca", "tipo", "peso_volume", "imagem_url", "categoria_id",
-    ];
-    for (const campo of campos) {
-      if (rest[campo] !== undefined) {
-        updateData[campo] = rest[campo];
-      }
-    }
-    if (ean !== undefined) updateData.codigo_barras = ean;
-    if (rest.ean !== undefined) updateData.codigo_barras = rest.ean;
+    if (rest.nome !== undefined) updateData.nome = rest.nome.trim();
+    if (rest.descricao !== undefined) updateData.descricao = rest.descricao;
+    if (rest.icone !== undefined) updateData.icone = rest.icone;
 
     if (Object.keys(updateData).length === 0) {
       return corsErr("Nenhum campo para atualizar", 400);
@@ -177,21 +131,26 @@ export async function PUT(req: NextRequest) {
 
     const supabase = getSupabaseServerClient();
     const { data, error } = await supabase
-      .from("produtos")
+      .from("categorias")
       .update(updateData)
       .eq("id", id)
-      .select("*");
+      .select();
 
     if (error) throw error;
     if (!data || data.length === 0) {
-      return corsErr("Produto não encontrado", 404);
+      return corsErr("Categoria não encontrada", 404);
     }
 
-    return corsOk(paraFront(data[0]));
+    return corsOk({
+      id: data[0].id,
+      nome: data[0].nome,
+      descricao: data[0].descricao || "",
+      icone: data[0].icone || "",
+    });
   } catch (error) {
-    console.error("[produtos] PUT error:", error);
+    console.error("[categorias] PUT error:", error);
     return corsErr(
-      error instanceof Error ? error.message : "Erro ao atualizar produto",
+      error instanceof Error ? error.message : "Erro ao atualizar categoria",
       500
     );
   }
@@ -206,18 +165,31 @@ export async function DELETE(req: NextRequest) {
     if (!(await isAdminOrModerador(token))) return corsErr("Sem permissão", 403);
 
     const supabase = getSupabaseServerClient();
-    const { error } = await supabase
+
+    const { count } = await supabase
       .from("produtos")
+      .select("*", { count: "exact", head: true })
+      .eq("categoria_id", id)
+      .eq("ativo", true);
+
+    const { error } = await supabase
+      .from("categorias")
       .update({ ativo: false })
       .eq("id", id);
 
     if (error) throw error;
 
-    return corsOk({ ok: true });
+    return corsOk({
+      ok: true,
+      produtosDesassociados: count ?? 0,
+      mensagem: count && count > 0
+        ? `Categoria desativada. ${count} produto(s) foram desassociados.`
+        : "Categoria desativada.",
+    });
   } catch (error) {
-    console.error("[produtos] DELETE error:", error);
+    console.error("[categorias] DELETE error:", error);
     return corsErr(
-      error instanceof Error ? error.message : "Erro ao excluir produto",
+      error instanceof Error ? error.message : "Erro ao excluir categoria",
       500
     );
   }
