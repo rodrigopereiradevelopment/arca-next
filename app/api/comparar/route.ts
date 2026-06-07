@@ -1,18 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/db/supabase";
 
-type MercadoId = 1 | 2 | 3 | 4 | 5 | 6;
-
-const SUPERMERCADOS: Record<MercadoId, string> = {
-  1: 'GoodBom',
-  2: 'PagueMenos',
-  3: 'São Vicente',
-  4: 'Atacadão',
-  5: 'Imperial',
-  6: 'Ponto Novo'
-};
-
-const MERCADOS_IDS: MercadoId[] = [1, 2, 3, 4, 5, 6];
+type MercadoId = number;
 
 interface ProdutoItem {
   id?: number;
@@ -35,61 +24,60 @@ interface RespostaMercado {
   produtos: any[];
 }
 
+let mercadosCache: { id: number; nome: string }[] | null = null;
+
+async function getMercados(): Promise<{ id: number; nome: string }[]> {
+  if (mercadosCache) return mercadosCache;
+  const supabase = getSupabaseServerClient();
+  const { data } = await supabase.from("supermercados").select("id, nome").order("id");
+  mercadosCache = (data ?? []).map((m: any) => ({ id: m.id, nome: m.nome }));
+  return mercadosCache;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { produtos } = await req.json() as { produtos: ProdutoItem[] };
-    console.log(`🔍 Comparando ${produtos.length} produtos...`);
 
     const supabase = getSupabaseServerClient();
+    const mercados = await getMercados();
 
-    const resultadosPorMercado: Record<MercadoId, ResultadoMercado> = {
-      1: { total: 0, itens: 0, produtos: [] },
-      2: { total: 0, itens: 0, produtos: [] },
-      3: { total: 0, itens: 0, produtos: [] },
-      4: { total: 0, itens: 0, produtos: [] },
-      5: { total: 0, itens: 0, produtos: [] },
-      6: { total: 0, itens: 0, produtos: [] }
-    };
+    if (mercados.length === 0) {
+      return NextResponse.json({ sucesso: false, erro: "Nenhum mercado cadastrado" }, { status: 404 });
+    }
+
+    const resultadosPorMercado: Record<number, ResultadoMercado> = {};
+    for (const m of mercados) {
+      resultadosPorMercado[m.id] = { total: 0, itens: 0, produtos: [] };
+    }
 
     for (const produto of produtos) {
-      console.log(`\n📦 Processando: ${produto.nome} (qtd: ${produto.quantidade})`);
-
-      // Para cada mercado, chama a RPC buscar_melhor_preco
-      // Roda todos os mercados em paralelo (mais rápido!)
       const resultados = await Promise.all(
-        MERCADOS_IDS.map(async (mercadoId) => {
+        mercados.map(async (mercado) => {
           try {
             const { data, error } = await supabase.rpc('buscar_melhor_preco', {
               p_produto_id: produto.id ?? null,
               p_nome: produto.nome,
-              p_mercado_id: mercadoId,
+              p_mercado_id: mercado.id,
               p_dias_max: 30
             });
 
-            console.log(`  🔎 Mercado ${mercadoId} raw:`, JSON.stringify({ data, error }));
-
             if (error || !data || data.length === 0) {
-              console.log(`  ❌ Mercado ${mercadoId} (${SUPERMERCADOS[mercadoId]}): não encontrado`);
-              return { mercadoId, preco: 0, nomeUsado: null, tipoBusca: null };
+              return { mercadoId: mercado.id, preco: 0, nomeUsado: null, tipoBusca: null };
             }
 
             const resultado = data[0];
-            console.log(`  ✅ Mercado ${mercadoId} (${SUPERMERCADOS[mercadoId]}): R$ ${resultado.preco} | ${resultado.tipo_busca} | ${resultado.nome_usado}`);
-
             return {
-              mercadoId,
+              mercadoId: mercado.id,
               preco: resultado.preco,
               nomeUsado: resultado.nome_usado,
               tipoBusca: resultado.tipo_busca
             };
-          } catch (err) {
-            console.error(`  ❌ Erro mercado ${mercadoId}:`, err);
-            return { mercadoId, preco: 0, nomeUsado: null, tipoBusca: null };
+          } catch {
+            return { mercadoId: mercado.id, preco: 0, nomeUsado: null, tipoBusca: null };
           }
         })
       );
 
-      // Acumula resultados por mercado
       for (const resultado of resultados) {
         const { mercadoId, preco, nomeUsado, tipoBusca } = resultado;
         const quantidade = produto.quantidade || 1;
@@ -120,24 +108,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Monta resposta final
-    const resposta: RespostaMercado[] = MERCADOS_IDS.map((id) => ({
-      id,
-      nome: SUPERMERCADOS[id],
-      total: resultadosPorMercado[id].total,
-      itensEncontrados: resultadosPorMercado[id].itens,
+    const nomesPorId: Record<number, string> = {};
+    for (const m of mercados) nomesPorId[m.id] = m.nome;
+
+    const resposta: RespostaMercado[] = mercados.map((m) => ({
+      id: m.id,
+      nome: nomesPorId[m.id],
+      total: resultadosPorMercado[m.id].total,
+      itensEncontrados: resultadosPorMercado[m.id].itens,
       totalProdutos: produtos.length,
-      produtos: resultadosPorMercado[id].produtos
+      produtos: resultadosPorMercado[m.id].produtos
     }));
 
-    // Ordena por menor preço (sem dados vai pro fim)
     resposta.sort((a, b) => {
       if (a.total === 0) return 1;
       if (b.total === 0) return -1;
       return a.total - b.total;
     });
-
-    console.log(`\n✅ Top mercado: ${resposta[0]?.nome} (R$ ${resposta[0]?.total.toFixed(2)})`);
 
     return NextResponse.json({
       sucesso: true,
@@ -146,7 +133,7 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error) {
-    console.error("❌ Erro no comparador:", error);
+    console.error("Erro no comparador:", error);
     return NextResponse.json(
       { sucesso: false, erro: error instanceof Error ? error.message : "Erro desconhecido" },
       { status: 500 }
