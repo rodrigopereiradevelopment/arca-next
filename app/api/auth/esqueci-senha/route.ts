@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/db/supabase';
-import { Resend } from 'resend';
 import crypto from 'crypto';
-
-function getResend() {
-  const key = process.env.RESEND_API_KEY;
-  if (!key) throw new Error('RESEND_API_KEY não configurada.');
-  return new Resend(key);
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -38,7 +31,12 @@ export async function POST(req: NextRequest) {
 
     const resetLink = `https://arca-ionic.vercel.app/#/redefinir-senha?token=${token}`;
 
-    await getResend().emails.send({
+    const { Resend } = await import('resend');
+    const key = process.env.RESEND_API_KEY;
+    if (!key) throw new Error('RESEND_API_KEY não configurada.');
+    const resend = new Resend(key);
+
+    await resend.emails.send({
       from: 'ARCA <onboarding@resend.dev>',
       to: email,
       subject: 'Recuperação de Senha — ARCA',
