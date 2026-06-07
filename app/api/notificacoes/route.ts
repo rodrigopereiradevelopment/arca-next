@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/db/supabase";
+import { enviarPush } from "@/lib/fcm";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -92,6 +93,11 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (error) return corsErr(error.message, 500);
+
+    enviarPush(user.id, titulo, mensagem, { tipo, ...dados_extras }).catch(
+      (e) => console.error("[notificacoes] push send error:", e)
+    );
+
     return corsOk(data);
   } catch (err) {
     console.error("[notificacoes] POST error:", err);

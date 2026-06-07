@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     }
     if (!token) return corsErr("Token necessario", 401);
 
-    const { fcm_token, plataforma } = body;
+    const { fcm_token, plataforma, ativo } = body;
     if (!fcm_token || !plataforma) {
       return corsErr("fcm_token e plataforma obrigatorios", 400);
     }
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
         user_id: user.id,
         token: fcm_token,
         plataforma,
-        ativo: true,
+        ativo: ativo !== false,
       },
       {
         onConflict: "token",
