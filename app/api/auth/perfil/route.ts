@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
 
   const { data } = await supabase
     .from('profiles')
-    .select('nome, telefone, cidade')
+    .select('nome, telefone, cidade, foto_perfil')
     .eq('id', user.id)
     .single();
 
