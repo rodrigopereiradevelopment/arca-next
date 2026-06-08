@@ -4,7 +4,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green?logo=supabase)](https://supabase.com)
-![Version](https://img.shields.io/badge/version-1.0.5-green)
+![Version](https://img.shields.io/badge/version-1.0.8-green)
 
 API backend do ecossistema **ARCA** — ponte entre o banco de dados (Supabase/MongoDB) e o aplicativo mobile. Gerencia catálogo de produtos, preços, mercados, usuários, autenticação, notificações, tickets, upload e mais.
 
@@ -76,7 +76,9 @@ MongoDB Atlas (Bronze) → ETL → Supabase PostgreSQL (Gold)
 | `POST` | `/api/auth/cadastro` | Cadastro de novo usuário |
 | `POST` | `/api/auth/logout` | Encerra sessão |
 | `POST` | `/api/auth/deletar-conta` | Soft delete (anonimiza + desativa) |
-| `GET` | `/api/auth/perfil` | Dados do perfil do usuário |
+| `POST` | `/api/auth/esqueci-senha` | Envia email de recuperação via Resend |
+| `POST` | `/api/auth/redefinir-senha` | Redefine senha com token de recuperação |
+| `GET` | `/api/auth/perfil` | Dados do perfil do usuário (inclui `foto_perfil`) |
 | `POST` | `/api/auth/perfil` | Atualiza dados do perfil |
 | `GET` | `/api/auth/enderecos` | Lista endereços do usuário |
 | `POST` | `/api/auth/enderecos` | Cria endereço |
@@ -89,9 +91,46 @@ MongoDB Atlas (Bronze) → ETL → Supabase PostgreSQL (Gold)
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
 | `GET` | `/api/notificacoes` | Lista notificações do usuário |
-| `POST` | `/api/notificacoes` | Cria notificação |
+| `POST` | `/api/notificacoes` | Cria notificação + dispara push via FCM |
 | `PUT` | `/api/notificacoes` | Marca como lida |
 | `DELETE` | `/api/notificacoes` | Remove notificação |
+| `POST` | `/api/notificacoes/registrar-token` | Registra FCM token do dispositivo |
+
+### Cupons
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| `GET` | `/api/cupons` | Lista cupons ativos |
+| `POST` | `/api/cupons` | Usar cupom (valida + marca usado) |
+
+### Favoritos
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| `GET` | `/api/favoritos` | Lista favoritos do usuário |
+| `POST` | `/api/favoritos` | Adiciona produto aos favoritos |
+| `DELETE` | `/api/favoritos` | Remove produto dos favoritos |
+
+### Denúncias
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| `GET` | `/api/denuncias` | Lista denúncias (admin/moderador vê todas) |
+| `POST` | `/api/denuncias` | Cria denúncia (produto/preço/mercado) |
+| `PUT` | `/api/denuncias` | Resolve denúncia (admin/moderador) |
+
+### Info Nutricional
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| `GET` | `/api/produtos/info-nutricional?barcode=XXX` | Cache Supabase + Open Food Facts |
+
+### Avaliações
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| `GET` | `/api/avaliacoes` | Lista avaliações de um supermercado |
+| `POST` | `/api/avaliacoes` | Cria avaliação (4 critérios + comentário) |
 
 ### Histórico
 
@@ -177,6 +216,7 @@ SUPABASE_SERVICE_ROLE_KEY=sua_service_role_key
 
 GEMINI_API_KEY=sua_chave_gemini
 SYNC_SECRET=seu_secret
+FIREBASE_ACCOUNT_PATH=./firebase-service-account.json
 DATABASE_URL=postgresql://...
 ```
 
@@ -214,6 +254,13 @@ npm run dev
 | `tickets_mensagens` | Mensagens dos tickets |
 | `alerta_preco` | Alertas de preço por produto (RLS) |
 | `configuracoes` | Preferências do usuário |
+| `cupons_desconto` | Cupons de desconto disponíveis |
+| `uso_cupons` | Histórico de uso de cupons por usuário |
+| `favoritos` | Produtos favoritados por usuário |
+| `denuncias` | Denúncias de produtos/preços/mercados |
+| `info_nutricional_cache` | Cache de informações nutricionais (Open Food Facts) |
+| `avaliacoes` | Avaliações de supermercados (4 critérios) |
+| `device_tokens` | Tokens FCM para push notifications (RLS) |
 
 ### Extensões
 
@@ -232,6 +279,8 @@ arca-next/
 │       │   ├── login/route.ts
 │       │   ├── cadastro/route.ts
 │       │   ├── logout/route.ts
+│       │   ├── esqueci-senha/route.ts
+│       │   ├── redefinir-senha/route.ts
 │       │   ├── deletar-conta/route.ts
 │       │   ├── perfil/route.ts
 │       │   ├── enderecos/route.ts
@@ -243,7 +292,18 @@ arca-next/
 │       ├── categorias/route.ts       # CRUD categorias
 │       ├── mercados/route.ts         # CRUD mercados + geocoding
 │       ├── comparar/route.ts         # Comparação dinâmica
-│       ├── notificacoes/route.ts     # CRUD notificações
+│       ├── notificacoes/
+│       │   ├── route.ts              # CRUD notificações
+│       │   └── registrar-token/route.ts # FCM token
+│       ├── favoritos/route.ts        # Favoritos do usuário
+│       ├── cupons/route.ts           # Cupons de desconto
+│       ├── denuncias/route.ts        # Denúncias + moderação
+│       ├── produtos/
+│       │   ├── route.ts              # CRUD + paginação + busca
+│       │   ├── precos/route.ts       # Preços por produto ou recentes
+│       │   ├── search/route.ts       # Busca fuzzy
+│       │   └── info-nutricional/route.ts # Open Food Facts
+│       ├── avaliacoes/route.ts       # Avaliações de mercados
 │       ├── historico/route.ts        # Histórico de atividades
 │       ├── tickets/
 │       │   ├── route.ts              # Lista/cria tickets
