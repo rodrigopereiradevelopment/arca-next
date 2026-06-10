@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 export async function POST(req: NextRequest) {
-  const { token, nome, telefone, cidade } = await req.json();
+  const { token, nome, telefone, cidade, cpf, estado, raio_busca } = await req.json();
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
 
   const { error } = await supabase
     .from('profiles')
-    .update({ nome, telefone, cidade })
+    .update({ nome, telefone, cidade, cpf, estado, raio_busca })
     .eq('id', user.id);
 
   if (error) return NextResponse.json({ erro: error.message }, { status: 400 });
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
 
   const { data } = await supabase
     .from('profiles')
-    .select('nome, telefone, cidade, foto_perfil')
+    .select('nome, telefone, cidade, cpf, foto_perfil, estado, raio_busca')
     .eq('id', user.id)
     .single();
 

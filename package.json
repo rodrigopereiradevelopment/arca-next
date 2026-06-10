@@ -3,7 +3,7 @@
   "version": "1.0.8",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "set NODE_OPTIONS=--max-old-space-size=512&& next dev --webpack",
     "build": "next build",
     "start": "next start"
   },
