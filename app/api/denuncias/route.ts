@@ -107,5 +107,9 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function OPTIONS() {
-  return NextResponse.json({}, { status: 204, headers: { Allow: 'GET, POST, PUT, OPTIONS' } });
+  return new NextResponse(null, { status: 204, headers: {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  }});
 }
