@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
         onConflict: "token",
         ignoreDuplicates: false,
       }
-    ).select().single();
+    ).select();
 
     if (upsertErr) {
       console.error("[registrar-token] upsert error:", upsertErr);

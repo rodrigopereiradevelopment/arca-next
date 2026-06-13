@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/db/supabase';
 
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  }});
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { token, novaSenha } = await req.json();
@@ -13,14 +21,14 @@ export async function POST(req: NextRequest) {
 
     const supabase = getSupabaseServerClient();
 
-    const { data: recovery } = await supabase
+    const { data: recovery, error: recoveryErr } = await supabase
       .from('recovery_tokens')
       .select('*')
       .eq('token', token)
       .eq('usado', false)
-      .single();
+      .maybeSingle();
 
-    if (!recovery) {
+    if (recoveryErr || !recovery) {
       return NextResponse.json({ erro: 'Token inválido ou já utilizado.' }, { status: 400 });
     }
 

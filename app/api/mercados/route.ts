@@ -35,7 +35,7 @@ async function isAdmin(token: string): Promise<boolean> {
       return false;
     }
     const { data: profile, error: profileError } = await supabase
-      .from("profiles").select("role").eq("id", user.id).single();
+      .from("profiles").select("role").eq("id", user.id).maybeSingle();
     if (profileError) {
       console.error("[mercados] isAdmin - profile error:", profileError.message);
       return false;

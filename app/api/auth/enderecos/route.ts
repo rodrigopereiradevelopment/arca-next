@@ -15,6 +15,14 @@ async function getUserId(token: string) {
   return user.id;
 }
 
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  }});
+}
+
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get('token');
   if (!token) return NextResponse.json({ erro: 'Token obrigatório' }, { status: 401 });
@@ -32,9 +40,10 @@ export async function POST(req: NextRequest) {
   const supabase = getSupabase();
   if (endereco.principal) await supabase.from('enderecos').update({ principal: false }).eq('user_id', userId);
   const { id: _id, ...enderecoSemId } = endereco;
-  const { data, error } = await supabase.from("enderecos").insert({ ...enderecoSemId, user_id: userId }).select().single();
+  const { data, error } = await supabase.from("enderecos").insert({ ...enderecoSemId, user_id: userId }).select();
   if (error) return NextResponse.json({ erro: error.message }, { status: 400 });
-  return NextResponse.json(data);
+  if (!data || data.length === 0) return NextResponse.json({ erro: 'Erro ao criar endereço' }, { status: 500 });
+  return NextResponse.json(data[0]);
 }
 
 export async function PUT(req: NextRequest) {
@@ -44,9 +53,10 @@ export async function PUT(req: NextRequest) {
   if (!userId) return NextResponse.json({ erro: 'Token inválido' }, { status: 401 });
   const supabase = getSupabase();
   if (endereco.principal) await supabase.from('enderecos').update({ principal: false }).eq('user_id', userId);
-  const { data, error } = await supabase.from('enderecos').update(endereco).eq('id', id).eq('user_id', userId).select().single();
+  const { data, error } = await supabase.from('enderecos').update(endereco).eq('id', id).eq('user_id', userId).select();
   if (error) return NextResponse.json({ erro: error.message }, { status: 400 });
-  return NextResponse.json(data);
+  if (!data || data.length === 0) return NextResponse.json({ erro: 'Endereço não encontrado' }, { status: 404 });
+  return NextResponse.json(data[0]);
 }
 
 export async function DELETE(req: NextRequest) {

@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/db/supabase';
 import crypto from 'crypto';
 
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  }});
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { email } = await req.json();
@@ -10,16 +18,6 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = getSupabaseServerClient();
-
-    const { data: user } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('email', email)
-      .single();
-
-    if (!user) {
-      return NextResponse.json({ mensagem: 'Se o e-mail existir, você receberá um link de recuperação.' });
-    }
 
     const token = crypto.randomBytes(32).toString('hex');
 

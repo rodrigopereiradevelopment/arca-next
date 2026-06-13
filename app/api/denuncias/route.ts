@@ -42,9 +42,9 @@ export async function GET(req: NextRequest) {
       .from('profiles')
       .select('role')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
-    const isMod = profile?.role === 'admin' || profile?.role === 'moderator';
+    const isMod = profile?.role === 'admin' || profile?.role === 'moderador';
 
     let query = supabase
       .from('denuncias')
@@ -83,9 +83,9 @@ export async function PUT(req: NextRequest) {
       .from('profiles')
       .select('role')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
-    if (!profile || (profile.role !== 'admin' && profile.role !== 'moderator')) {
+    if (!profile || (profile.role !== 'admin' && profile.role !== 'moderador')) {
       return NextResponse.json({ erro: 'Apenas moderadores podem resolver denúncias.' }, { status: 403 });
     }
 

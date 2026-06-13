@@ -28,7 +28,7 @@ async function isAdminOrModerador(token: string): Promise<boolean> {
     const { data: { user }, error } = await supabase.auth.getUser(token);
     if (error || !user) return false;
     const { data: profile } = await supabase
-      .from("profiles").select("role").eq("id", user.id).single();
+      .from("profiles").select("role").eq("id", user.id).maybeSingle();
     return profile?.role === "admin" || profile?.role === "moderador";
   } catch {
     return false;

@@ -17,8 +17,16 @@ async function getUserId(token: string) {
 async function isAdmin(token: string) {
   const userId = await getUserId(token);
   if (!userId) return false;
-  const { data } = await getSupabase().from('profiles').select('role').eq('id', userId).single();
+  const { data } = await getSupabase().from('profiles').select('role').eq('id', userId).maybeSingle();
   return data?.role === 'admin';
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,PUT,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  }});
 }
 
 export async function GET(req: NextRequest) {
