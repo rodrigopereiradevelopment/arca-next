@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
 const VERSAO_ATUAL = {
-  versao: "1.0.9",
-  versionCode: 9,
+  versao: "1.1.0",
+  versionCode: 10,
   url: "https://github.com/rodrigopereiradevelopment/arca-ionic/releases/latest",
   obrigatorio: false,
-  mensagem: "Correções de bugs e melhorias de desempenho.",
+  mensagem: "Correções de bugs: header, navegação imersiva, favoritos, mapa, editar produtos.",
 };
 
 export const dynamic = "force-static";
