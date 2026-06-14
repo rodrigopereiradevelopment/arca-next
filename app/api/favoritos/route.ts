@@ -1,14 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/db/supabase';
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+function corsOk(data: any, status = 200) {
+  return NextResponse.json(data, { status, headers: CORS_HEADERS });
+}
+
+function corsErr(erro: string, status: number) {
+  return NextResponse.json({ erro }, { status, headers: CORS_HEADERS });
+}
+
 export async function GET(req: NextRequest) {
   try {
     const token = req.nextUrl.searchParams.get('token') || req.headers.get('authorization')?.replace('Bearer ', '');
-    if (!token) return NextResponse.json({ erro: 'Token obrigatório.' }, { status: 401 });
+    if (!token) return corsErr('Token obrigatório.', 401);
 
     const supabase = getSupabaseServerClient();
     const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-    if (userError || !user) return NextResponse.json({ erro: 'Não autenticado.' }, { status: 401 });
+    if (userError || !user) return corsErr('Não autenticado.', 401);
 
     const { data } = await supabase
       .from('favoritos')
@@ -49,38 +63,34 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json(resultado);
+    return corsOk(resultado);
   } catch (err) {
     console.error('FAVORITOS GET ERROR:', err);
-    return NextResponse.json({ erro: 'Erro interno.' }, { status: 500 });
+    return corsErr('Erro interno.', 500);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const { token, produto_id } = await req.json();
-    if (!token || !produto_id) {
-      return NextResponse.json({ erro: 'Token e produto_id obrigatórios.' }, { status: 400 });
-    }
+    if (!token || !produto_id) return corsErr('Token e produto_id obrigatórios.', 400);
 
     const supabase = getSupabaseServerClient();
     const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-    if (userError || !user) return NextResponse.json({ erro: 'Não autenticado.' }, { status: 401 });
+    if (userError || !user) return corsErr('Não autenticado.', 401);
 
     const { error } = await supabase
       .from('favoritos')
       .insert({ user_id: user.id, produto_id });
 
     if (error) {
-      if (error.code === '23505') {
-        return NextResponse.json({ mensagem: 'Produto já favoritado.' });
-      }
-      return NextResponse.json({ erro: 'Erro ao favoritar.' }, { status: 500 });
+      if (error.code === '23505') return corsOk({ mensagem: 'Produto já favoritado.' });
+      return corsErr('Erro ao favoritar.', 500);
     }
 
-    return NextResponse.json({ mensagem: 'Favoritado!' });
+    return corsOk({ mensagem: 'Favoritado!' });
   } catch {
-    return NextResponse.json({ erro: 'Erro interno.' }, { status: 500 });
+    return corsErr('Erro interno.', 500);
   }
 }
 
@@ -88,13 +98,11 @@ export async function DELETE(req: NextRequest) {
   try {
     const produto_id = Number(req.nextUrl.searchParams.get('produto_id'));
     const token = req.nextUrl.searchParams.get('token') || req.headers.get('authorization')?.replace('Bearer ', '');
-    if (!token || !produto_id) {
-      return NextResponse.json({ erro: 'Token e produto_id obrigatórios.' }, { status: 400 });
-    }
+    if (!token || !produto_id) return corsErr('Token e produto_id obrigatórios.', 400);
 
     const supabase = getSupabaseServerClient();
     const { data: { user }, error: userError } = await supabase.auth.getUser(token);
-    if (userError || !user) return NextResponse.json({ erro: 'Não autenticado.' }, { status: 401 });
+    if (userError || !user) return corsErr('Não autenticado.', 401);
 
     const { error } = await supabase
       .from('favoritos')
@@ -102,18 +110,14 @@ export async function DELETE(req: NextRequest) {
       .eq('user_id', user.id)
       .eq('produto_id', produto_id);
 
-    if (error) return NextResponse.json({ erro: 'Erro ao remover favorito.' }, { status: 500 });
+    if (error) return corsErr('Erro ao remover favorito.', 500);
 
-    return NextResponse.json({ mensagem: 'Removido dos favoritos.' });
+    return corsOk({ mensagem: 'Removido dos favoritos.' });
   } catch {
-    return NextResponse.json({ erro: 'Erro interno.' }, { status: 500 });
+    return corsErr('Erro interno.', 500);
   }
 }
 
 export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  }});
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
