@@ -67,11 +67,9 @@ export async function GET(req: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "20")));
     const from = (page - 1) * limit;
-    const to = from + limit - 1;
+    const to = from + limit; // fetch one extra to detect temMais
 
-    let query = supabase
-      .from("produtos")
-      .select("*", { count: "exact" });
+    let query = supabase.from("produtos").select("*");
 
     if (ativo !== "todos") {
       query = query.eq("ativo", ativo !== "false");
@@ -87,15 +85,20 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const { data, error, count } = await query
+    const { data, error } = await query
       .order("created_at", { ascending: false })
       .range(from, to);
 
     if (error) throw error;
 
+    const items = data ?? [];
+    const temMais = items.length > limit;
+    const produtos = temMais ? items.slice(0, limit) : items;
+
     return corsOk({
-      data: (data ?? []).map(paraFront),
-      total: count ?? 0,
+      data: produtos.map(paraFront),
+      total: from + produtos.length + (temMais ? 1 : 0),
+      temMais,
       page,
       limit,
     });
