@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/db/supabase";
 
+export const dynamic = "force-dynamic";
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+export async function OPTIONS() {
+  return NextResponse.json({}, { status: 204, headers: CORS_HEADERS });
+}
+
 type MercadoId = number;
 
 interface ProdutoItem {
@@ -42,7 +54,7 @@ export async function POST(req: NextRequest) {
     const mercados = await getMercados();
 
     if (mercados.length === 0) {
-      return NextResponse.json({ sucesso: false, erro: "Nenhum mercado cadastrado" }, { status: 404 });
+      return NextResponse.json({ sucesso: false, erro: "Nenhum mercado cadastrado" }, { status: 404, headers: CORS_HEADERS });
     }
 
     const resultadosPorMercado: Record<number, ResultadoMercado> = {};
@@ -130,13 +142,13 @@ export async function POST(req: NextRequest) {
       sucesso: true,
       mercados: resposta,
       totalProdutos: produtos.length
-    });
+    }, { headers: CORS_HEADERS });
 
   } catch (error) {
     console.error("Erro no comparador:", error);
     return NextResponse.json(
       { sucesso: false, erro: error instanceof Error ? error.message : "Erro desconhecido" },
-      { status: 500 }
+      { status: 500, headers: CORS_HEADERS }
     );
   }
 }
