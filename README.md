@@ -4,7 +4,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green?logo=supabase)](https://supabase.com)
-![Version](https://img.shields.io/badge/version-1.0.8-green)
+![Version](https://img.shields.io/badge/version-1.1.1-green)
 
 API backend do ecossistema **ARCA** — ponte entre o banco de dados (Supabase/MongoDB) e o aplicativo mobile. Gerencia catálogo de produtos, preços, mercados, usuários, autenticação, notificações, tickets, upload e mais.
 
@@ -27,7 +27,8 @@ MongoDB Atlas (Bronze) → ETL → Supabase PostgreSQL (Gold)
 ```
 
 - **Supabase HTTP** — todas as rotas usam `getSupabaseServerClient()` diretamente
-- **Prisma ORM** — schema em `prisma/schema.prisma`, singleton global
+- **Firebase Admin** — push notifications via `lib/fcm.ts` (FCM)
+- **MongoDB** — driver nativo para consultas na camada Bronze
 
 ---
 
@@ -42,7 +43,7 @@ MongoDB Atlas (Bronze) → ETL → Supabase PostgreSQL (Gold)
 | `PUT` | `/api/produtos` | Atualiza produto (auth admin/moderador) |
 | `DELETE` | `/api/produtos` | Soft delete (auth admin/moderador) |
 | `GET` | `/api/produtos/precos` | Lista preços por produto ou 20 mais recentes |
-| `GET` | `/api/produtos/search?q={termo}` | Busca fuzzy por nome (pg_trgm) |
+| `GET` | `/api/produtos/search?q={termo}&categoria_id={id}&page={n}` | Busca fuzzy + categoria + paginação |
 
 ### Categorias
 
@@ -164,11 +165,21 @@ MongoDB Atlas (Bronze) → ETL → Supabase PostgreSQL (Gold)
 |--------|----------|-----------|
 | `POST` | `/api/upload` | Upload (multipart) — `folder: avatars|mercados` |
 
+### Usuários (Admin)
+
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| `GET` | `/api/auth/usuarios` | Lista usuários (auth admin) |
+| `PUT` | `/api/auth/usuarios` | Atualiza role/status (auth admin) |
+| `DELETE` | `/api/auth/usuarios` | Soft delete (auth admin) |
+| `POST` | `/api/auth/login-token` | Login com token (admin) |
+
 ### Utilitários
 
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
 | `GET` | `/api/health` | Status da API |
+| `GET` | `/api/versao` | Versão atual do app (in-app update) |
 | `POST` | `/api/chat` | Assistente IA (Gemini) com contexto |
 | `GET` | `/api/configuracoes` | Preferências do usuário |
 | `PUT` | `/api/configuracoes` | Atualiza preferências |
@@ -216,7 +227,13 @@ SUPABASE_SERVICE_ROLE_KEY=sua_service_role_key
 
 GEMINI_API_KEY=sua_chave_gemini
 SYNC_SECRET=seu_secret
+RESEND_API_KEY=seu_resend_key
+
+# Firebase Admin (push notifications) — escolha uma das formas:
 FIREBASE_ACCOUNT_PATH=./firebase-service-account.json
+# ou na Vercel:
+# FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+
 DATABASE_URL=postgresql://...
 ```
 
@@ -262,10 +279,12 @@ npm run dev
 | `avaliacoes` | Avaliações de supermercados (4 critérios) |
 | `device_tokens` | Tokens FCM para push notifications (RLS) |
 
-### Extensões
+### Extensões PostgreSQL
 
 - **pg_trgm** — busca fuzzy por similaridade de texto
-- **RLS (Row Level Security)** — notificações, alertas, atividades, tickets
+- **pgvector** — busca semântica por similaridade de cosseno (correlação entre mercados)
+- **PostGIS** — consultas geoespaciais (coordenadas dos mercados)
+- **RLS (Row Level Security)** — notificações, alertas, tickets, favoritos, device_tokens
 
 ---
 
@@ -285,10 +304,23 @@ arca-next/
 │       │   ├── perfil/route.ts
 │       │   ├── enderecos/route.ts
 │       │   └── alterar-senha/route.ts
+│       ├── auth/
+│       │   ├── login/route.ts
+│       │   ├── login-token/route.ts
+│       │   ├── cadastro/route.ts
+│       │   ├── logout/route.ts
+│       │   ├── esqueci-senha/route.ts
+│       │   ├── redefinir-senha/route.ts
+│       │   ├── deletar-conta/route.ts
+│       │   ├── perfil/route.ts
+│       │   ├── enderecos/route.ts
+│       │   ├── alterar-senha/route.ts
+│       │   └── usuarios/route.ts
 │       ├── produtos/
 │       │   ├── route.ts              # CRUD + paginação + busca
 │       │   ├── precos/route.ts       # Preços por produto ou recentes
-│       │   └── search/route.ts       # Busca fuzzy
+│       │   ├── search/route.ts       # Busca fuzzy + categoria + paginação
+│       │   └── info-nutricional/route.ts # Open Food Facts
 │       ├── categorias/route.ts       # CRUD categorias
 │       ├── mercados/route.ts         # CRUD mercados + geocoding
 │       ├── comparar/route.ts         # Comparação dinâmica
@@ -298,11 +330,6 @@ arca-next/
 │       ├── favoritos/route.ts        # Favoritos do usuário
 │       ├── cupons/route.ts           # Cupons de desconto
 │       ├── denuncias/route.ts        # Denúncias + moderação
-│       ├── produtos/
-│       │   ├── route.ts              # CRUD + paginação + busca
-│       │   ├── precos/route.ts       # Preços por produto ou recentes
-│       │   ├── search/route.ts       # Busca fuzzy
-│       │   └── info-nutricional/route.ts # Open Food Facts
 │       ├── avaliacoes/route.ts       # Avaliações de mercados
 │       ├── historico/route.ts        # Histórico de atividades
 │       ├── tickets/
@@ -314,14 +341,16 @@ arca-next/
 │       ├── upload/route.ts           # Upload genérico (folders)
 │       ├── configuracoes/route.ts    # Preferências do usuário
 │       ├── chat/route.ts             # Assistente IA (Gemini)
-│       └── health/route.ts
+│       ├── health/route.ts           # Health check
+│       └── versao/route.ts           # Versão app (in-app update)
 ├── lib/
 │   ├── db/
-│   │   ├── mongodb.ts
+│   │   ├── mongodb.ts               # Conexão MongoDB (Bronze)
 │   │   ├── supabase.ts              # getSupabaseServerClient()
 │   │   └── prisma.ts                # Prisma singleton global
-│   └── auth/
-│       └── admin.ts                 # isAdmin(), isAdminOrModerador()
+│   ├── auth/
+│   │   └── admin.ts                 # isAdmin(), isAdminOrModerador()
+│   └── fcm.ts                       # Firebase Admin — sendEachForMulticast
 ├── prisma/
 │   └── schema.prisma
 └── .env.local
@@ -335,13 +364,17 @@ arca-next/
 |------------|-----|
 | Next.js 16 | Framework (App Router, --webpack) |
 | TypeScript | Linguagem |
-| Supabase | PostgreSQL + Auth via HTTP |
-| Prisma 7 | ORM com adapter pg |
+| Supabase | PostgreSQL + Auth + Storage |
 | MongoDB | Dados brutos (Bronze) |
 | pg_trgm | Busca fuzzy |
+| pgvector | Similaridade semântica vetorial |
+| PostGIS | Geolocalização de mercados |
 | Google Gemini | Assistente IA |
+| Firebase Admin SDK | Envio de push notifications (FCM) |
+| Resend | E-mail transacional (recuperação senha) |
 | Nominatim | Geocoding de mercados |
-| Vercel | Deploy e hospedagem |
+| Open Food Facts | Info nutricional (cache + API) |
+| Vercel | Deploy e hospedagem serverless |
 
 ---
 
@@ -355,16 +388,15 @@ arca-next/
 
 ---
 
-## 🧹 Rotas Removidas
-
-As seguintes rotas foram removidas por não serem mais consumidas pelo frontend:
+## 🧹 Rotas Removidas (Legado)
 
 | Rota | Motivo |
 |------|--------|
 | `GET /api/produtos/preco` | Substituída por `/api/produtos/precos` |
 | `GET /api/produtos/preco-similar` | Nunca consumida pelo app |
 | `GET /api/setup-test` | Apenas para testes iniciais |
-| `GET /api/migrate` | Migração única, já concluída |
+| `POST /api/migrate` | Migração única, já concluída |
+| `GET /api/notificacoes/nao-lidas` | Substituída por contagem na listagem |
 
 ---
 
