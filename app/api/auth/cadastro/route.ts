@@ -12,6 +12,10 @@ export async function OPTIONS() {
 export async function POST(req: NextRequest) {
   const { nome, email, senha } = await req.json();
 
+  if (!senha || senha.length < 8) {
+    return NextResponse.json({ erro: 'Senha deve ter no mínimo 8 caracteres.' }, { status: 400 });
+  }
+
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!

@@ -15,8 +15,8 @@ export async function POST(req: NextRequest) {
     if (!token || !novaSenha) {
       return NextResponse.json({ erro: 'Token e nova senha são obrigatórios.' }, { status: 400 });
     }
-    if (novaSenha.length < 6) {
-      return NextResponse.json({ erro: 'Senha deve ter no mínimo 6 caracteres.' }, { status: 400 });
+    if (novaSenha.length < 8) {
+      return NextResponse.json({ erro: 'Senha deve ter no mínimo 8 caracteres.' }, { status: 400 });
     }
 
     const supabase = getSupabaseServerClient();
