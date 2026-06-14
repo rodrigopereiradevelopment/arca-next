@@ -22,8 +22,7 @@ export async function POST(req: NextRequest) {
 
   const { error } = await supabase
     .from('profiles')
-    .update({ nome, telefone, cidade, cpf, estado, raio_busca })
-    .eq('id', user.id);
+    .upsert({ id: user.id, nome, telefone, cidade, cpf, estado, raio_busca });
 
   if (error) return NextResponse.json({ erro: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });
@@ -45,7 +44,7 @@ export async function GET(req: NextRequest) {
     .from('profiles')
     .select('nome, telefone, cidade, cpf, foto_perfil, estado, raio_busca')
     .eq('id', user.id)
-    .single();
+    .maybeSingle();
 
-  return NextResponse.json(data || {});
+  return NextResponse.json(data ?? {});
 }
