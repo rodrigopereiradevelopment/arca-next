@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/db/supabase";
 
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 const CORS_HEADERS = {
@@ -10,7 +11,7 @@ const CORS_HEADERS = {
 };
 
 export async function OPTIONS() {
-  return NextResponse.json({}, { status: 204, headers: CORS_HEADERS });
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
 
 type MercadoId = number;

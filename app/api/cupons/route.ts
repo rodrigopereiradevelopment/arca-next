@@ -77,5 +77,5 @@ export async function POST(req: NextRequest) {
 }
 
 export async function OPTIONS() {
-  return NextResponse.json({}, { status: 204, headers: { 'Allow': 'GET, POST, OPTIONS' } });
+  return new Response(null, { status: 204, headers: { 'Allow': 'GET, POST, OPTIONS' } });
 }

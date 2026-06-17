@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = "edge";
+
 // 1. Trata a requisição de pré-configuração (CORS) que o Ionic faz antes do POST
 export async function OPTIONS() {
   return new NextResponse(null, {
