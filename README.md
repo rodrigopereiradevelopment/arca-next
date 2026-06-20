@@ -4,7 +4,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green?logo=supabase)](https://supabase.com)
-![Version](https://img.shields.io/badge/version-1.1.1-green)
+![Version](https://img.shields.io/badge/version-1.1.2-green)
 
 API backend do ecossistema **ARCA** — ponte entre o banco de dados (Supabase/MongoDB) e o aplicativo mobile. Gerencia catálogo de produtos, preços, mercados, usuários, autenticação, notificações, tickets, upload e mais.
 
@@ -80,7 +80,7 @@ MongoDB Atlas (Bronze) → ETL → Supabase PostgreSQL (Gold)
 | `POST` | `/api/auth/esqueci-senha` | Envia email de recuperação via Resend |
 | `POST` | `/api/auth/redefinir-senha` | Redefine senha com token de recuperação |
 | `GET` | `/api/auth/perfil` | Dados do perfil do usuário (inclui `foto_perfil`) |
-| `POST` | `/api/auth/perfil` | Atualiza dados do perfil |
+| `POST` | `/api/auth/perfil` | Atualiza dados do perfil (inclui `foto_perfil`) |
 | `GET` | `/api/auth/enderecos` | Lista endereços do usuário |
 | `POST` | `/api/auth/enderecos` | Cria endereço |
 | `PUT` | `/api/auth/enderecos` | Atualiza endereço / definir principal |

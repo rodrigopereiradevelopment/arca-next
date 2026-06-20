@@ -10,7 +10,7 @@ export async function OPTIONS() {
 }
 
 export async function POST(req: NextRequest) {
-  const { token, nome, telefone, cidade, cpf, estado, raio_busca } = await req.json();
+  const { token, nome, telefone, cidade, cpf, estado, raio_busca, foto_perfil } = await req.json();
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -20,9 +20,12 @@ export async function POST(req: NextRequest) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) return NextResponse.json({ erro: 'Token inválido' }, { status: 401 });
 
+  const updateData: Record<string, any> = { id: user.id, nome, telefone, cidade, cpf, estado, raio_busca };
+  if (foto_perfil !== undefined) updateData.foto_perfil = foto_perfil;
+
   const { error } = await supabase
     .from('profiles')
-    .upsert({ id: user.id, nome, telefone, cidade, cpf, estado, raio_busca });
+    .upsert(updateData);
 
   if (error) return NextResponse.json({ erro: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });

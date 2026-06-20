@@ -16,12 +16,13 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password: senha });
   if (error) return NextResponse.json({ erro: error.message }, { status: 401 });
   const { data: perfil } = await supabase
-    .from('profiles').select('nome, role').eq('id', data.user.id).maybeSingle();
+    .from('profiles').select('nome, role, foto_perfil').eq('id', data.user.id).maybeSingle();
   return NextResponse.json({
     id: data.user.id,
     email: data.user.email,
     nome: perfil?.nome || email.split('@')[0],
     tipo: perfil?.role || 'usuario',
+    foto_perfil: perfil?.foto_perfil || null,
     token: data.session?.access_token
   });
 }

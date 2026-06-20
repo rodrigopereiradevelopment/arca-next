@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/db/supabase";
 
-export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 const CORS_HEADERS = {
@@ -14,123 +13,145 @@ export async function OPTIONS() {
   return new Response(null, { status: 204, headers: CORS_HEADERS });
 }
 
-type MercadoId = number;
-
 interface ProdutoItem {
   id?: number;
   nome: string;
   quantidade: number;
 }
 
-interface ResultadoMercado {
-  total: number;
-  itens: number;
-  produtos: any[];
-}
-
-interface RespostaMercado {
-  id: number;
-  nome: string;
-  total: number;
-  itensEncontrados: number;
-  totalProdutos: number;
-  produtos: any[];
-}
-
-let mercadosCache: { id: number; nome: string }[] | null = null;
-
-async function getMercados(): Promise<{ id: number; nome: string }[]> {
-  if (mercadosCache) return mercadosCache;
-  const supabase = getSupabaseServerClient();
-  const { data } = await supabase.from("supermercados").select("id, nome").order("id");
-  mercadosCache = (data ?? []).map((m: any) => ({ id: m.id, nome: m.nome }));
-  return mercadosCache;
-}
-
 export async function POST(req: NextRequest) {
   try {
     const { produtos } = await req.json() as { produtos: ProdutoItem[] };
+    if (!produtos || produtos.length === 0) {
+      return NextResponse.json({ sucesso: false, erro: "Nenhum produto enviado" }, { status: 400, headers: CORS_HEADERS });
+    }
 
     const supabase = getSupabaseServerClient();
-    const mercados = await getMercados();
 
-    if (mercados.length === 0) {
+    const { data: mercados } = await supabase.from("supermercados").select("id, nome").order("id");
+    if (!mercados || mercados.length === 0) {
       return NextResponse.json({ sucesso: false, erro: "Nenhum mercado cadastrado" }, { status: 404, headers: CORS_HEADERS });
     }
 
-    const resultadosPorMercado: Record<number, ResultadoMercado> = {};
+    // 1. Resolve each product request to a produto_id in one pass
+    const idsByname: Record<string, { id: number; nome: string }> = {};
+    const nomeToRequest: Record<string, string> = {};
+
+    for (const p of produtos) {
+      if (p.id) continue; // will use direct ID
+
+      const termo = p.nome.trim().toUpperCase();
+      if (!termo || idsByname[termo]) continue; // already resolved
+
+      const { data: found } = await supabase.from("produtos").select("id, nome")
+        .ilike("nome", `%${termo}%`).limit(1);
+
+      if (found && found.length > 0) {
+        idsByname[termo] = { id: found[0].id, nome: found[0].nome };
+        nomeToRequest[found[0].nome] = p.nome;
+      }
+    }
+
+    // Collect all produto_ids
+    const allIds = new Set<number>();
+    for (const p of produtos) {
+      if (p.id) allIds.add(p.id);
+    }
+    for (const v of Object.values(idsByname)) allIds.add(v.id);
+
+    if (allIds.size === 0) {
+      return NextResponse.json({ sucesso: false, erro: "Nenhum produto encontrado" }, { status: 404, headers: CORS_HEADERS });
+    }
+
+    // 2. Get ALL product names and ALL prices in two queries
+    const idList = [...allIds];
+
+    const { data: nomes } = await supabase.from("produtos").select("id, nome").in("id", idList);
+    const nomePorId: Record<number, string> = {};
+    if (nomes) for (const n of nomes) nomePorId[n.id] = n.nome;
+
+    const trintaDiasAtras = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: precos } = await supabase
+      .from("precos")
+      .select("produto_id, supermercado_id, preco, data_coleta")
+      .in("produto_id", idList)
+      .gte("data_coleta", trintaDiasAtras);
+
+    const priceMap: Record<string, number> = {};
+    const dateMap: Record<string, string> = {};
+    if (precos) {
+      for (const p of precos) {
+        const key = `${p.produto_id}_${p.supermercado_id}`;
+        if (!dateMap[key] || p.data_coleta > dateMap[key]) {
+          priceMap[key] = p.preco;
+          dateMap[key] = p.data_coleta;
+        }
+      }
+    }
+
+    // 3. Resolve ID for each product request
+    function resolveId(produto: ProdutoItem): { id: number; nome: string } | null {
+      if (produto.id && nomePorId[produto.id]) {
+        return { id: produto.id, nome: nomePorId[produto.id] };
+      }
+      const termo = produto.nome.trim().toUpperCase();
+      const found = idsByname[termo];
+      if (found) return found;
+      return null;
+    }
+
+    // 4. Build response
+    interface MercadoAcc {
+      total: number;
+      itens: number;
+      produtos: any[];
+    }
+    const acc: Record<number, MercadoAcc> = {};
     for (const m of mercados) {
-      resultadosPorMercado[m.id] = { total: 0, itens: 0, produtos: [] };
+      acc[m.id] = { total: 0, itens: 0, produtos: [] };
     }
 
     for (const produto of produtos) {
-      const resultados = await Promise.all(
-        mercados.map(async (mercado) => {
-          try {
-            const { data, error } = await supabase.rpc('buscar_melhor_preco', {
-              p_produto_id: produto.id ?? null,
-              p_nome: produto.nome,
-              p_mercado_id: mercado.id,
-              p_dias_max: 30
-            });
+      const quantidade = produto.quantidade || 1;
+      const resolved = resolveId(produto);
 
-            if (error || !data || data.length === 0) {
-              return { mercadoId: mercado.id, preco: 0, nomeUsado: null, tipoBusca: null };
-            }
+      for (const mercado of mercados) {
+        if (!resolved) {
+          acc[mercado.id].produtos.push({
+            nome: produto.nome, nomeEncontrado: null, tipoBusca: null,
+            quantidade, precoUnitario: 0, subtotal: 0, naoEncontrado: true,
+          });
+          continue;
+        }
 
-            const resultado = data[0];
-            return {
-              mercadoId: mercado.id,
-              preco: resultado.preco,
-              nomeUsado: resultado.nome_usado,
-              tipoBusca: resultado.tipo_busca
-            };
-          } catch {
-            return { mercadoId: mercado.id, preco: 0, nomeUsado: null, tipoBusca: null };
-          }
-        })
-      );
+        const preco = priceMap[`${resolved.id}_${mercado.id}`];
 
-      for (const resultado of resultados) {
-        const { mercadoId, preco, nomeUsado, tipoBusca } = resultado;
-        const quantidade = produto.quantidade || 1;
-
-        if (preco > 0) {
-          resultadosPorMercado[mercadoId].total += preco * quantidade;
-          resultadosPorMercado[mercadoId].itens++;
-          resultadosPorMercado[mercadoId].produtos.push({
-            nome: produto.nome,
-            nomeEncontrado: nomeUsado,
-            tipoBusca,
-            quantidade,
-            precoUnitario: preco,
-            subtotal: preco * quantidade,
-            naoEncontrado: false
+        if (preco !== undefined && preco > 0) {
+          acc[mercado.id].total += preco * quantidade;
+          acc[mercado.id].itens++;
+          acc[mercado.id].produtos.push({
+            nome: produto.nome, nomeEncontrado: resolved.nome,
+            tipoBusca: produto.id ? 'id' : 'nome',
+            quantidade, precoUnitario: preco, subtotal: preco * quantidade,
+            naoEncontrado: false,
           });
         } else {
-          resultadosPorMercado[mercadoId].produtos.push({
-            nome: produto.nome,
-            nomeEncontrado: null,
-            tipoBusca: null,
-            quantidade,
-            precoUnitario: 0,
-            subtotal: 0,
-            naoEncontrado: true
+          acc[mercado.id].produtos.push({
+            nome: produto.nome, nomeEncontrado: resolved.nome,
+            tipoBusca: produto.id ? 'id' : 'nome',
+            quantidade, precoUnitario: 0, subtotal: 0, naoEncontrado: true,
           });
         }
       }
     }
 
-    const nomesPorId: Record<number, string> = {};
-    for (const m of mercados) nomesPorId[m.id] = m.nome;
-
-    const resposta: RespostaMercado[] = mercados.map((m) => ({
+    const resposta = mercados.map((m) => ({
       id: m.id,
-      nome: nomesPorId[m.id],
-      total: resultadosPorMercado[m.id].total,
-      itensEncontrados: resultadosPorMercado[m.id].itens,
+      nome: m.nome,
+      total: acc[m.id].total,
+      itensEncontrados: acc[m.id].itens,
       totalProdutos: produtos.length,
-      produtos: resultadosPorMercado[m.id].produtos
+      produtos: acc[m.id].produtos,
     }));
 
     resposta.sort((a, b) => {
@@ -142,7 +163,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       sucesso: true,
       mercados: resposta,
-      totalProdutos: produtos.length
+      totalProdutos: produtos.length,
     }, { headers: CORS_HEADERS });
 
   } catch (error) {
