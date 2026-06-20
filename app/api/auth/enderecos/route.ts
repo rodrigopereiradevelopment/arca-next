@@ -49,8 +49,7 @@ export async function POST(req: NextRequest) {
   
   const supabase = getSupabase();
   if (enderecoRaw.principal) await supabase.from('enderecos').update({ principal: false }).eq('user_id', userId);
-  const { id: _id, ...enderecoSemId } = endereco;
-  const { data, error } = await supabase.from("enderecos").insert({ ...enderecoSemId, user_id: userId }).select();
+  const { data, error } = await supabase.from("enderecos").insert({ ...endereco, user_id: userId }).select();
   if (error) return NextResponse.json({ erro: error.message }, { status: 400 });
   if (!data || data.length === 0) return NextResponse.json({ erro: 'Erro ao criar endereço' }, { status: 500 });
   return NextResponse.json(data[0]);
