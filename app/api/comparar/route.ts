@@ -36,9 +36,9 @@ export async function POST(req: NextRequest) {
 
     const supabase = getSupabaseServerClient();
 
-    // Buscar mercados ativos
+    // Buscar todos os mercados (incluindo pendentes para demo/TCC)
     const { data: mercados } = await supabase.from("supermercados")
-      .select("id, nome").eq("status", "aprovado").order("id");
+      .select("id, nome").order("id");
     if (!mercados || mercados.length === 0) {
       return NextResponse.json({ sucesso: false, erro: "Nenhum mercado cadastrado" }, { status: 404, headers: CORS_HEADERS });
     }
