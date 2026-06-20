@@ -122,6 +122,7 @@ export function sanitizeCadastro(data: any) {
   return {
     nome: sanitizeName(data.nome),
     email: sanitizeEmail(data.email),
+    senha: String(data.senha || '').slice(0, 128),
     cpf: sanitizeCpf(data.cpf),
     telefone: sanitizePhone(data.telefone),
     cidade: sanitizeAddress(data.cidade),
