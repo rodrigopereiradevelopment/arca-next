@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { sanitizeCadastro, validateCadastro } from '@/lib/validation';
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: {
@@ -10,10 +11,15 @@ export async function OPTIONS() {
 }
 
 export async function POST(req: NextRequest) {
-  const { nome, email, senha } = await req.json();
-
-  if (!senha || senha.length < 8) {
-    return NextResponse.json({ erro: 'Senha deve ter no mínimo 8 caracteres.' }, { status: 400 });
+  const raw = await req.json();
+  
+  // Sanitizar inputs
+  const { nome, email, senha } = sanitizeCadastro(raw);
+  
+  // Validar
+  const errors = validateCadastro(raw);
+  if (errors.length > 0) {
+    return NextResponse.json({ erro: errors[0] }, { status: 400 });
   }
 
   const supabase = createClient(

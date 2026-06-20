@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { sanitizePerfil } from '@/lib/validation';
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: {
@@ -10,7 +11,12 @@ export async function OPTIONS() {
 }
 
 export async function POST(req: NextRequest) {
-  const { token, nome, telefone, cidade, cpf, estado, raio_busca, foto_perfil } = await req.json();
+  const raw = await req.json();
+  const { token, foto_perfil } = raw;
+  
+  // Sanitizar inputs do perfil
+  const sanitized = sanitizePerfil(raw);
+  const { nome, telefone, cidade, cpf, estado, raio_busca } = sanitized;
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

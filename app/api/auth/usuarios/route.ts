@@ -61,6 +61,13 @@ export async function PUT(req: NextRequest) {
   if (!token || !(await isAdmin(token))) {
     return NextResponse.json({ erro: 'Sem permissão' }, { status: 403 });
   }
+  
+  // Validar role
+  const validRoles = ['user', 'moderador', 'admin'];
+  if (!validRoles.includes(role)) {
+    return NextResponse.json({ erro: 'Role inválido' }, { status: 400 });
+  }
+  
   const { error } = await getSupabase()
     .from('profiles')
     .update({ role })

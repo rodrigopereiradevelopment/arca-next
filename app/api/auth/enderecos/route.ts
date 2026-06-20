@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { sanitizeEndereco, validateEndereco } from '@/lib/validation';
 
 function getSupabase() {
   return createClient(
@@ -33,12 +34,21 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { token, ...endereco } = await req.json();
+  const raw = await req.json();
+  const { token, ...enderecoRaw } = raw;
   if (!token) return NextResponse.json({ erro: 'Token obrigatório' }, { status: 401 });
   const userId = await getUserId(token);
   if (!userId) return NextResponse.json({ erro: 'Token inválido' }, { status: 401 });
+  
+  // Sanitizar e validar
+  const endereco = sanitizeEndereco(enderecoRaw);
+  const errors = validateEndereco(enderecoRaw);
+  if (errors.length > 0) {
+    return NextResponse.json({ erro: errors[0] }, { status: 400 });
+  }
+  
   const supabase = getSupabase();
-  if (endereco.principal) await supabase.from('enderecos').update({ principal: false }).eq('user_id', userId);
+  if (enderecoRaw.principal) await supabase.from('enderecos').update({ principal: false }).eq('user_id', userId);
   const { id: _id, ...enderecoSemId } = endereco;
   const { data, error } = await supabase.from("enderecos").insert({ ...enderecoSemId, user_id: userId }).select();
   if (error) return NextResponse.json({ erro: error.message }, { status: 400 });
@@ -47,12 +57,17 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const { token, id, ...endereco } = await req.json();
+  const raw = await req.json();
+  const { token, id, ...enderecoRaw } = raw;
   if (!token) return NextResponse.json({ erro: 'Token obrigatório' }, { status: 401 });
   const userId = await getUserId(token);
   if (!userId) return NextResponse.json({ erro: 'Token inválido' }, { status: 401 });
+  
+  // Sanitizar
+  const endereco = sanitizeEndereco(enderecoRaw);
+  
   const supabase = getSupabase();
-  if (endereco.principal) await supabase.from('enderecos').update({ principal: false }).eq('user_id', userId);
+  if (enderecoRaw.principal) await supabase.from('enderecos').update({ principal: false }).eq('user_id', userId);
   const { data, error } = await supabase.from('enderecos').update(endereco).eq('id', id).eq('user_id', userId).select();
   if (error) return NextResponse.json({ erro: error.message }, { status: 400 });
   if (!data || data.length === 0) return NextResponse.json({ erro: 'Endereço não encontrado' }, { status: 404 });
