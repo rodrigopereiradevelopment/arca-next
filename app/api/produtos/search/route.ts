@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   try {
     const supabase = getSupabaseServerClient();
 
-    // Category browsing (no text query)
+    // Busca por categoria (sem texto)
     if ((!query || query.length < 2) && categoriaId) {
       const { data, error } = await supabase
         .from("produtos")
@@ -33,13 +33,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ data: produtos, temMais, page, limit });
     }
 
-    // Text search via RPC
+    // Busca por texto via RPC (trigram + substring)
     if (query && query.length >= 2) {
       const { data, error } = await supabase
-        .rpc('buscar_produtos', { termo: query.toLowerCase() });
+        .rpc('buscar_produtos', { p_termo: query, p_limite: limit + 1 });
 
       if (error) throw error;
-      return NextResponse.json({ data: data ?? [], temMais: false, page: 1, limit: 0 });
+
+      const items = data ?? [];
+      const temMais = items.length > limit;
+      const produtos = temMais ? items.slice(0, limit) : items;
+
+      return NextResponse.json({ data: produtos, temMais, page, limit });
     }
 
     return NextResponse.json({ data: [], temMais: false, page: 1, limit: 0 });

@@ -26,7 +26,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ sucesso: false, erro: "Nenhum produto enviado" }, { status: 400, headers: CORS_HEADERS });
     }
 
-    // Limitar payload a 50 produtos
     const MAX_PRODUTOS = 50;
     if (produtos.length > MAX_PRODUTOS) {
       return NextResponse.json(
@@ -37,87 +36,109 @@ export async function POST(req: NextRequest) {
 
     const supabase = getSupabaseServerClient();
 
-    const { data: mercados } = await supabase.from("supermercados").select("id, nome").order("id");
+    // Buscar mercados ativos
+    const { data: mercados } = await supabase.from("supermercados")
+      .select("id, nome").eq("status", "aprovado").order("id");
     if (!mercados || mercados.length === 0) {
       return NextResponse.json({ sucesso: false, erro: "Nenhum mercado cadastrado" }, { status: 404, headers: CORS_HEADERS });
     }
 
-    // 1. Resolve each product request to a produto_id in one pass
-    const idsByname: Record<string, { id: number; nome: string }> = {};
-    const nomeToRequest: Record<string, string> = {};
+    // ── 1. Resolver todos os produtos de uma vez (batch) ──────────────
+    const nomesUnicos = [...new Set(
+      produtos.filter(p => !p.id).map(p => p.nome.trim().toUpperCase())
+    )];
 
-    for (const p of produtos) {
-      if (p.id) continue; // will use direct ID
+    const idsDiretos = produtos.filter(p => p.id).map(p => p.id!);
+    const resolvedMap: Record<string, { id: number; nome: string; categoria_id: number | null; peso_volume: string | null }> = {};
 
-      const termo = p.nome.trim().toUpperCase();
-      if (!termo || idsByname[termo]) continue; // already resolved
+    // Buscar por IDs diretos
+    if (idsDiretos.length > 0) {
+      const { data: porId } = await supabase.from("produtos")
+        .select("id, nome, categoria_id, peso_volume")
+        .in("id", idsDiretos);
+      if (porId) for (const p of porId) resolvedMap[String(p.id)] = p;
+    }
 
-      const { data: found } = await supabase.from("produtos").select("id, nome")
-        .ilike("nome", `%${termo}%`).limit(1);
+    // Buscar por nome (batch com OR)
+    for (const termo of nomesUnicos) {
+      if (Object.values(resolvedMap).some(r => r.nome?.toUpperCase() === termo)) continue;
 
-      if (found && found.length > 0) {
-        idsByname[termo] = { id: found[0].id, nome: found[0].nome };
-        nomeToRequest[found[0].nome] = p.nome;
+      const { data: encontrado } = await supabase.from("produtos")
+        .select("id, nome, categoria_id, peso_volume")
+        .ilike("nome", `%${termo}%`)
+        .order("nome", { ascending: true })
+        .limit(1);
+
+      if (encontrado && encontrado.length > 0) {
+        resolvedMap[termo] = encontrado[0];
       }
     }
 
-    // Collect all produto_ids
+    // ── 2. Buscar todos os preços de uma vez ──────────────────────────
     const allIds = new Set<number>();
     for (const p of produtos) {
-      if (p.id) allIds.add(p.id);
+      if (p.id && resolvedMap[String(p.id)]) allIds.add(p.id);
     }
-    for (const v of Object.values(idsByname)) allIds.add(v.id);
-
-    if (allIds.size === 0) {
-      return NextResponse.json({ sucesso: false, erro: "Nenhum produto encontrado" }, { status: 404, headers: CORS_HEADERS });
-    }
-
-    // 2. Get ALL product names and ALL prices in two queries
-    const idList = [...allIds];
-
-    const { data: nomes } = await supabase.from("produtos").select("id, nome").in("id", idList);
-    const nomePorId: Record<number, string> = {};
-    if (nomes) for (const n of nomes) nomePorId[n.id] = n.nome;
+    for (const v of Object.values(resolvedMap)) allIds.add(v.id);
 
     const trintaDiasAtras = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: precos } = await supabase
-      .from("precos")
-      .select("produto_id, supermercado_id, preco, data_coleta")
-      .in("produto_id", idList)
-      .gte("data_coleta", trintaDiasAtras);
-
     const priceMap: Record<string, number> = {};
     const dateMap: Record<string, string> = {};
-    if (precos) {
-      for (const p of precos) {
-        const key = `${p.produto_id}_${p.supermercado_id}`;
-        if (!dateMap[key] || p.data_coleta > dateMap[key]) {
-          priceMap[key] = p.preco;
-          dateMap[key] = p.data_coleta;
+
+    if (allIds.size > 0) {
+      const { data: precos } = await supabase
+        .from("precos")
+        .select("produto_id, supermercado_id, preco, data_coleta")
+        .in("produto_id", [...allIds])
+        .gte("data_coleta", trintaDiasAtras);
+
+      if (precos) {
+        for (const p of precos) {
+          const key = `${p.produto_id}_${p.supermercado_id}`;
+          if (!dateMap[key] || p.data_coleta > dateMap[key]) {
+            priceMap[key] = p.preco;
+            dateMap[key] = p.data_coleta;
+          }
         }
       }
     }
 
-    // 3. Resolve ID for each product request
-    function resolveId(produto: ProdutoItem): { id: number; nome: string } | null {
-      if (produto.id && nomePorId[produto.id]) {
-        return { id: produto.id, nome: nomePorId[produto.id] };
+    // ── 3. Função auxiliar: resolver ID de um produto ─────────────────
+    function resolveId(produto: ProdutoItem): { id: number; nome: string; categoria_id: number | null; peso_volume: string | null } | null {
+      if (produto.id) {
+        const found = resolvedMap[String(produto.id)];
+        return found || null;
       }
       const termo = produto.nome.trim().toUpperCase();
-      const found = idsByname[termo];
-      if (found) return found;
+      // Busca direta primeiro
+      for (const v of Object.values(resolvedMap)) {
+        if (v.nome?.toUpperCase() === termo) return v;
+      }
+      // Busca parcial
+      for (const v of Object.values(resolvedMap)) {
+        if (v.nome?.toUpperCase().includes(termo) || termo.includes(v.nome?.toUpperCase() || '')) return v;
+      }
       return null;
     }
 
-    // 4. Build response
+    // ── 4. Construir matriz de comparação ─────────────────────────────
     interface MercadoAcc {
       total: number;
       itens: number;
       produtos: any[];
     }
     const acc: Record<number, MercadoAcc> = {};
-    for (const m of mercados) {
-      acc[m.id] = { total: 0, itens: 0, produtos: [] };
+    for (const m of mercados) acc[m.id] = { total: 0, itens: 0, produtos: [] };
+
+    // Pré-computar preço médio de referência para cada produto
+    const precoMedioRef: Record<number, number> = {};
+    for (const id of allIds) {
+      const precosProduto = Object.entries(priceMap)
+        .filter(([k]) => k.startsWith(`${id}_`))
+        .map(([, v]) => v);
+      if (precosProduto.length > 0) {
+        precoMedioRef[id] = precosProduto.reduce((a, b) => a + b, 0) / precosProduto.length;
+      }
     }
 
     for (const produto of produtos) {
@@ -136,6 +157,7 @@ export async function POST(req: NextRequest) {
         const preco = priceMap[`${resolved.id}_${mercado.id}`];
 
         if (preco !== undefined && preco > 0) {
+          // Produto exato encontrado
           acc[mercado.id].total += preco * quantidade;
           acc[mercado.id].itens++;
           acc[mercado.id].produtos.push({
@@ -145,19 +167,51 @@ export async function POST(req: NextRequest) {
             naoEncontrado: false,
           });
         } else {
-          acc[mercado.id].produtos.push({
-            nome: produto.nome, nomeEncontrado: resolved.nome,
-            tipoBusca: produto.id ? 'id' : 'nome',
-            quantidade, precoUnitario: 0, subtotal: 0, naoEncontrado: true,
+          // ── Fallback: buscar similar ──────────────────────────────
+          const { data: similares } = await supabase.rpc('buscar_produtos_similares', {
+            p_nome: produto.nome,
+            p_categoria_id: resolved.categoria_id,
+            p_peso: resolved.peso_volume,
+            p_preco_ref: precoMedioRef[resolved.id] || null,
+            p_mercado_id: mercado.id,
+            p_produto_id: resolved.id,
+            p_limite: 1,
           });
+
+          if (similares && similares.length > 0 && similares[0].score_relevancia >= 0.35) {
+            const s = similares[0];
+            acc[mercado.id].total += s.preco * quantidade;
+            acc[mercado.id].itens++;
+            acc[mercado.id].produtos.push({
+              nome: produto.nome,
+              nomeEncontrado: s.nome_produto,
+              tipoBusca: 'similar',
+              similarInfo: {
+                nomeOriginal: resolved.nome,
+                motivo: s.motivo,
+                score: s.score_relevancia,
+              },
+              quantidade, precoUnitario: s.preco, subtotal: s.preco * quantidade,
+              naoEncontrado: false,
+            });
+          } else {
+            // Realmente não encontrado
+            acc[mercado.id].produtos.push({
+              nome: produto.nome,
+              nomeEncontrado: resolved.nome,
+              tipoBusca: produto.id ? 'id' : 'nome',
+              quantidade, precoUnitario: 0, subtotal: 0, naoEncontrado: true,
+            });
+          }
         }
       }
     }
 
+    // ── 5. Montar resposta ────────────────────────────────────────────
     const resposta = mercados.map((m) => ({
       id: m.id,
       nome: m.nome,
-      total: acc[m.id].total,
+      total: Math.round(acc[m.id].total * 100) / 100,
       itensEncontrados: acc[m.id].itens,
       totalProdutos: produtos.length,
       produtos: acc[m.id].produtos,
