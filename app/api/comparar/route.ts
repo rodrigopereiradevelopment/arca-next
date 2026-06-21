@@ -167,16 +167,16 @@ export async function POST(req: NextRequest) {
             naoEncontrado: false,
           });
         } else {
-          // ── Fallback: buscar similar via embedding (Fase 2) ────────
+          // ── Fallback: buscar similar via Fase 1 (trigram) ────────
           try {
-            const { data: similares } = await supabase.rpc('buscar_produtos_embedding', {
+            const { data: similares } = await supabase.rpc('buscar_produtos_similares', {
               p_nome: produto.nome,
               p_categoria_id: resolved.categoria_id,
+              p_peso: resolved.peso_volume,
+              p_preco_ref: precoMedioRef[resolved.id] || null,
               p_mercado_id: mercado.id,
               p_produto_id: resolved.id,
               p_limite: 1,
-              p_peso: null,
-              p_preco_ref: null,
             });
 
             if (similares && similares.length > 0 && similares[0].score_relevancia >= 0.35) {
@@ -204,7 +204,7 @@ export async function POST(req: NextRequest) {
               });
             }
           } catch (simErr) {
-            console.warn('Embedding fallback falhou:', simErr);
+            console.warn('Fallback similar falhou:', simErr);
             acc[mercado.id].produtos.push({
               nome: produto.nome,
               nomeEncontrado: resolved.nome,
