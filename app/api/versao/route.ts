@@ -5,7 +5,7 @@ const VERSAO_ATUAL = {
   versionCode: 17,
   url: "",
   obrigatorio: false,
-  mensagem: "Versão de teste para validar o in-app update.",
+  mensagem: "Download via navegador — correção do CORS.",
 };
 VERSAO_ATUAL.url = `https://github.com/rodrigopereiradevelopment/arca-ionic/releases/download/v${VERSAO_ATUAL.versao}/arca-v${VERSAO_ATUAL.versao}.apk`;
 
