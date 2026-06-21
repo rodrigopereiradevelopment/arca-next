@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
 const VERSAO_ATUAL = {
-  versao: "1.1.4",
-  versionCode: 14,
-  url: "https://github.com/rodrigopereiradevelopment/arca-ionic/releases/download/v1.1.4/app-debug.apk",
+  versao: "1.1.5",
+  versionCode: 15,
+  url: "https://github.com/rodrigopereiradevelopment/arca-ionic/releases/download/v1.1.5/app-debug.apk",
   obrigatorio: false,
-  mensagem: "In-app update: download e instalação direto pelo app, sem ir ao GitHub.",
+  mensagem: "Busca por produtos similares com embeddings (Fase 2) — resultados mais precisos.",
 };
 
 export const dynamic = "force-static";

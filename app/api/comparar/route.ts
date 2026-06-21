@@ -167,12 +167,10 @@ export async function POST(req: NextRequest) {
             naoEncontrado: false,
           });
         } else {
-          // ── Fallback: buscar similar ──────────────────────────────
-          const { data: similares } = await supabase.rpc('buscar_produtos_similares', {
-            p_nome: produto.nome,
+          // ── Fallback: buscar similar via embedding (Fase 2) ────────
+          const { data: similares } = await supabase.rpc('buscar_produtos_embedding', {
+            p_search_term: produto.nome,
             p_categoria_id: resolved.categoria_id,
-            p_peso: resolved.peso_volume,
-            p_preco_ref: precoMedioRef[resolved.id] || null,
             p_mercado_id: mercado.id,
             p_produto_id: resolved.id,
             p_limite: 1,
