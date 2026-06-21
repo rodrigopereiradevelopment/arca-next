@@ -168,32 +168,43 @@ export async function POST(req: NextRequest) {
           });
         } else {
           // ── Fallback: buscar similar via embedding (Fase 2) ────────
-          const { data: similares } = await supabase.rpc('buscar_produtos_embedding', {
-            p_search_term: produto.nome,
-            p_categoria_id: resolved.categoria_id,
-            p_mercado_id: mercado.id,
-            p_produto_id: resolved.id,
-            p_limite: 1,
-          });
-
-          if (similares && similares.length > 0 && similares[0].score_relevancia >= 0.35) {
-            const s = similares[0];
-            acc[mercado.id].total += s.preco * quantidade;
-            acc[mercado.id].itens++;
-            acc[mercado.id].produtos.push({
-              nome: produto.nome,
-              nomeEncontrado: s.nome_produto,
-              tipoBusca: 'similar',
-              similarInfo: {
-                nomeOriginal: resolved.nome,
-                motivo: s.motivo,
-                score: s.score_relevancia,
-              },
-              quantidade, precoUnitario: s.preco, subtotal: s.preco * quantidade,
-              naoEncontrado: false,
+          try {
+            const { data: similares } = await supabase.rpc('buscar_produtos_embedding', {
+              p_nome: produto.nome,
+              p_categoria_id: resolved.categoria_id,
+              p_mercado_id: mercado.id,
+              p_produto_id: resolved.id,
+              p_limite: 1,
+              p_peso: null,
+              p_preco_ref: null,
             });
-          } else {
-            // Realmente não encontrado
+
+            if (similares && similares.length > 0 && similares[0].score_relevancia >= 0.35) {
+              const s = similares[0];
+              acc[mercado.id].total += s.preco * quantidade;
+              acc[mercado.id].itens++;
+              acc[mercado.id].produtos.push({
+                nome: produto.nome,
+                nomeEncontrado: s.nome_produto,
+                tipoBusca: 'similar',
+                similarInfo: {
+                  nomeOriginal: resolved.nome,
+                  motivo: s.motivo,
+                  score: s.score_relevancia,
+                },
+                quantidade, precoUnitario: s.preco, subtotal: s.preco * quantidade,
+                naoEncontrado: false,
+              });
+            } else {
+              acc[mercado.id].produtos.push({
+                nome: produto.nome,
+                nomeEncontrado: resolved.nome,
+                tipoBusca: produto.id ? 'id' : 'nome',
+                quantidade, precoUnitario: 0, subtotal: 0, naoEncontrado: true,
+              });
+            }
+          } catch (simErr) {
+            console.warn('Embedding fallback falhou:', simErr);
             acc[mercado.id].produtos.push({
               nome: produto.nome,
               nomeEncontrado: resolved.nome,
