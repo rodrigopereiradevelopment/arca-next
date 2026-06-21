@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
 const VERSAO_ATUAL = {
-  versao: "1.1.5",
-  versionCode: 15,
+  versao: "1.1.6",
+  versionCode: 16,
   url: "",
   obrigatorio: false,
-  mensagem: "Busca por produtos similares com embeddings (Fase 2) — resultados mais precisos.",
+  mensagem: "Versão dinâmica via App.getInfo() + UX download melhorada.",
 };
 VERSAO_ATUAL.url = `https://github.com/rodrigopereiradevelopment/arca-ionic/releases/download/v${VERSAO_ATUAL.versao}/arca-v${VERSAO_ATUAL.versao}.apk`;
 
