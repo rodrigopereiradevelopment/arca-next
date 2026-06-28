@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ sucesso: false, erro: "Nenhum produto enviado" }, { status: 400, headers: CORS_HEADERS });
     }
 
-    const MAX_PRODUTOS = 50;
+    const MAX_PRODUTOS = 10;
     if (produtos.length > MAX_PRODUTOS) {
       return NextResponse.json(
         { sucesso: false, erro: `Máximo de ${MAX_PRODUTOS} produtos por comparação. Você enviou ${produtos.length}.` },
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ sucesso: false, erro: "Nenhum mercado cadastrado" }, { status: 404, headers: CORS_HEADERS });
     }
 
-    // ── 1. Resolver todos os produtos de uma vez (batch) ──────────────
+    // ── 1. Resolver todos os produtos de uma vez via RPC em lote ─────────
     const nomesUnicos = [...new Set(
       produtos.filter(p => !p.id).map(p => p.nome.trim().toUpperCase())
     )];
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     const idsDiretos = produtos.filter(p => p.id).map(p => p.id!);
     const resolvedMap: Record<string, { id: number; nome: string; categoria_id: number | null; peso_volume: string | null }> = {};
 
-    // Buscar por IDs diretos
+    // Buscar por IDs diretos (mantém batch)
     if (idsDiretos.length > 0) {
       const { data: porId } = await supabase.from("produtos")
         .select("id, nome, categoria_id, peso_volume")
@@ -59,18 +59,25 @@ export async function POST(req: NextRequest) {
       if (porId) for (const p of porId) resolvedMap[String(p.id)] = p;
     }
 
-    // Buscar por nome (batch com OR)
-    for (const termo of nomesUnicos) {
-      if (Object.values(resolvedMap).some(r => r.nome?.toUpperCase() === termo)) continue;
+    // Buscar por nome via RPC em lote (uma query só)
+    if (nomesUnicos.length > 0) {
+      const { data: resolvidos, error } = await supabase.rpc('resolver_produtos', {
+        p_nomes: nomesUnicos,
+      });
 
-      const { data: encontrado } = await supabase.from("produtos")
-        .select("id, nome, categoria_id, peso_volume")
-        .ilike("nome", `%${termo}%`)
-        .order("nome", { ascending: true })
-        .limit(1);
-
-      if (encontrado && encontrado.length > 0) {
-        resolvedMap[termo] = encontrado[0];
+      if (error) {
+        console.error('Erro na resolução em lote:', error);
+      } else if (resolvidos) {
+        for (const r of resolvidos) {
+          if (r.termo_original && r.produto_id) {
+            resolvedMap[r.termo_original] = {
+              id: r.produto_id,
+              nome: r.nome_produto,
+              categoria_id: r.categoria_id,
+              peso_volume: r.peso_volume,
+            };
+          }
+        }
       }
     }
 
@@ -179,7 +186,7 @@ export async function POST(req: NextRequest) {
               p_limite: 1,
             });
 
-            if (similares && similares.length > 0 && similares[0].score_relevancia >= 0.35) {
+            if (similares && similares.length > 0 && similares[0].score_relevancia >= 0.55) {
               const s = similares[0];
               acc[mercado.id].total += s.preco * quantidade;
               acc[mercado.id].itens++;
