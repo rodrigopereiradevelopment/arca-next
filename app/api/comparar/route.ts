@@ -173,10 +173,11 @@ export async function POST(req: NextRequest) {
             quantidade, precoUnitario: preco, subtotal: preco * quantidade,
             naoEncontrado: false,
           });
-        } else {
+} else {
           // ── Fallback: buscar similar via Fase 1 (trigram) ────────
           try {
-            const { data: similares } = await supabase.rpc('buscar_produtos_similares', {
+            const start = Date.now();
+            const { data: similares, error } = await supabase.rpc('buscar_produtos_similares', {
               p_nome: produto.nome,
               p_categoria_id: resolved.categoria_id,
               p_peso: resolved.peso_volume,
@@ -186,7 +187,13 @@ export async function POST(req: NextRequest) {
               p_limite: 1,
             });
 
-            if (similares && similares.length > 0 && similares[0].score_relevancia >= 0.6) {
+            if (error) {
+              console.warn(`Similar fallback error (${mercado.nome}):`, error);
+            }
+
+            console.log(`Similar fallback (${mercado.nome}): ${Date.now() - start}ms, count: ${similares?.length || 0}`);
+
+            if (similares && similares.length > 0 && similares[0].score_relevancia >= 0.35) {
               const s = similares[0];
               acc[mercado.id].total += s.preco * quantidade;
               acc[mercado.id].itens++;
@@ -210,6 +217,15 @@ export async function POST(req: NextRequest) {
                 quantidade, precoUnitario: 0, subtotal: 0, naoEncontrado: true,
               });
             }
+          } catch (simErr) {
+            console.warn('Fallback similar falhou:', simErr);
+            acc[mercado.id].produtos.push({
+              nome: produto.nome,
+              nomeEncontrado: resolved.nome,
+              tipoBusca: produto.id ? 'id' : 'nome',
+              quantidade, precoUnitario: 0, subtotal: 0, naoEncontrado: true,
+            });
+          }
           } catch (simErr) {
             console.warn('Fallback similar falhou:', simErr);
             acc[mercado.id].produtos.push({
