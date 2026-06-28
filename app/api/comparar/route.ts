@@ -186,7 +186,7 @@ export async function POST(req: NextRequest) {
               p_limite: 1,
             });
 
-            if (similares && similares.length > 0 && similares[0].score_relevancia >= 0.75) {
+            if (similares && similares.length > 0 && similares[0].score_relevancia >= 0.6) {
               const s = similares[0];
               acc[mercado.id].total += s.preco * quantidade;
               acc[mercado.id].itens++;
