@@ -4,7 +4,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green?logo=supabase)](https://supabase.com)
-![Version](https://img.shields.io/badge/version-1.1.4-green)
+![Version](https://img.shields.io/badge/version-1.1.5-green)
 
 API backend do ecossistema **ARCA** — ponte entre o banco de dados (Supabase/MongoDB) e o aplicativo mobile. Gerencia catálogo de produtos, preços, mercados, usuários, autenticação, notificações, tickets, upload e mais.
 
@@ -67,7 +67,7 @@ MongoDB Atlas (Bronze) → ETL → Supabase PostgreSQL (Gold)
 
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
-| `POST` | `/api/comparar` | Compara preços entre mercados (dinâmico — query Supabase) |
+| `POST` | `/api/comparar` | Compara preços entre mercados (Promise.all paralelo + ILIKE + similar trigram) |
 
 ### Auth
 
