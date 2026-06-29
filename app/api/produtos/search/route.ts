@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
       const [{ data: precos, error: err2 }, { data: cats, error: err3 }] = await Promise.all([
         supabase
           .from("precos")
-          .select("produto_id, preco")
+          .select("produto_id, preco, supermercado_id, data_coleta")
           .in("produto_id", ids)
           .gte("data_coleta", trintaDias),
         supabase
@@ -65,8 +65,12 @@ export async function GET(req: NextRequest) {
       if (err3) throw err3;
 
       const catMap = new Map(cats?.map(c => [c.id, c.nome]) ?? []);
+      const precoPorProduto = new Map<number, { preco: number; supermercado_id: number; data_coleta: string }[]>();
       const precoMinMap = new Map<number, number>();
       for (const p of precos ?? []) {
+        const lista = precoPorProduto.get(p.produto_id) ?? [];
+        lista.push({ preco: p.preco, supermercado_id: p.supermercado_id, data_coleta: p.data_coleta });
+        precoPorProduto.set(p.produto_id, lista);
         const atual = precoMinMap.get(p.produto_id);
         if (atual === undefined || p.preco < atual) {
           precoMinMap.set(p.produto_id, p.preco);
@@ -82,6 +86,7 @@ export async function GET(req: NextRequest) {
         categoria_id: p.categoria_id,
         categoria_nome: catMap.get(p.categoria_id) ?? null,
         preco_minimo: precoMinMap.get(p.id) ?? null,
+        precos: precoPorProduto.get(p.id) ?? [],
       }));
 
       const temMais = data.length > limit;
