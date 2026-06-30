@@ -129,37 +129,32 @@ export async function POST(req: NextRequest) {
       itens: number;
       produtos: any[];
     }
+
+    // 4a. Primeira passada: preços exatos + coletar produtos que precisam fallback
     const acc: Record<number, MercadoAcc> = {};
     for (const m of mercados) acc[m.id] = { total: 0, itens: 0, produtos: [] };
 
-    // Pré-computar preço médio de referência para cada produto
-    const precoMedioRef: Record<number, number> = {};
-    for (const id of allIds) {
-      const precosProduto = Object.entries(priceMap)
-        .filter(([k]) => k.startsWith(`${id}_`))
-        .map(([, v]) => v);
-      if (precosProduto.length > 0) {
-        precoMedioRef[id] = precosProduto.reduce((a, b) => a + b, 0) / precosProduto.length;
-      }
-    }
+    const produtosResolvidos: { produto: ProdutoItem; resolved: { id: number; nome: string; categoria_id: number | null } }[] = [];
 
     for (const produto of produtos) {
       const quantidade = produto.quantidade || 1;
       const resolved = resolveId(produto);
-
-      for (const mercado of mercados) {
-        if (!resolved) {
-          acc[mercado.id].produtos.push({
+      if (!resolved) {
+        for (const m of mercados) {
+          acc[m.id].produtos.push({
             nome: produto.nome, nomeEncontrado: null, tipoBusca: null,
             quantidade, precoUnitario: 0, subtotal: 0, naoEncontrado: true,
           });
-          continue;
         }
+        continue;
+      }
+      produtosResolvidos.push({ produto, resolved });
 
+      let temExato = false;
+      for (const mercado of mercados) {
         const preco = priceMap[`${resolved.id}_${mercado.id}`];
-
         if (preco !== undefined && preco > 0) {
-          // Produto exato encontrado
+          temExato = true;
           acc[mercado.id].total += preco * quantidade;
           acc[mercado.id].itens++;
           acc[mercado.id].produtos.push({
@@ -168,58 +163,113 @@ export async function POST(req: NextRequest) {
             quantidade, precoUnitario: preco, subtotal: preco * quantidade,
             naoEncontrado: false,
           });
-} else {
-          // ── Fallback: buscar similar via Fase 1 (trigram) ────────
-          try {
-            const start = Date.now();
-            const { data: similares, error } = await supabase.rpc('buscar_produtos_similares', {
-              p_nome: produto.nome,
-              p_categoria_id: resolved.categoria_id,
-              p_peso: resolved.peso_volume,
-              p_preco_ref: precoMedioRef[resolved.id] || null,
-              p_mercado_id: mercado.id,
-              p_produto_id: resolved.id,
-              p_limite: 1,
-            });
+        }
+      }
 
-            if (error) {
-              console.warn(`Similar fallback error (${mercado.nome}):`, error);
-            }
-
-            console.log(`Similar fallback (${mercado.nome}): ${Date.now() - start}ms, count: ${similares?.length || 0}`);
-
-            if (similares && similares.length > 0 && similares[0].score_relevancia >= 0.35) {
-              const s = similares[0];
-              acc[mercado.id].total += s.preco * quantidade;
-              acc[mercado.id].itens++;
-              acc[mercado.id].produtos.push({
-                nome: produto.nome,
-                nomeEncontrado: s.nome_produto,
-                tipoBusca: 'similar',
-                similarInfo: {
-                  nomeOriginal: resolved.nome,
-                  motivo: s.motivo,
-                  score: s.score_relevancia,
-                },
-                quantidade, precoUnitario: s.preco, subtotal: s.preco * quantidade,
-                naoEncontrado: false,
-              });
-            } else {
-              acc[mercado.id].produtos.push({
-                nome: produto.nome,
-                nomeEncontrado: resolved.nome,
-                tipoBusca: produto.id ? 'id' : 'nome',
-                quantidade, precoUnitario: 0, subtotal: 0, naoEncontrado: true,
-              });
-            }
-          } catch (simErr) {
-            console.warn('Fallback similar falhou:', simErr);
+      // Preencher mercados sem preço exato com placeholder (substituído no fallback)
+      if (!temExato) {
+        for (const mercado of mercados) {
+          const preco = priceMap[`${resolved.id}_${mercado.id}`];
+          if (!preco || preco <= 0) {
             acc[mercado.id].produtos.push({
-              nome: produto.nome,
-              nomeEncontrado: resolved.nome,
-              tipoBusca: produto.id ? 'id' : 'nome',
+              nome: produto.nome, nomeEncontrado: null, tipoBusca: null,
               quantidade, precoUnitario: 0, subtotal: 0, naoEncontrado: true,
             });
+          }
+        }
+      }
+    }
+
+    // 4b. Fallback: buscar similares via ILIKE (1 query por produto, não por mercado)
+    //     O índice GIN idx_produtos_nome_trgm torna ILIKE rápido (~120ms)
+    const fallbacks = produtosResolvidos.filter(({ resolved }) => {
+      for (const m of mercados) {
+        const preco = priceMap[`${resolved.id}_${m.id}`];
+        if (!preco || preco <= 0) return true;
+      }
+      return false;
+    });
+
+    if (fallbacks.length > 0) {
+      const resultados = await Promise.all(
+        fallbacks.map(async ({ produto, resolved }) => {
+          // Extrai termos-chave do nome do produto (primeiras 3 palavras)
+          const termos = (produto.nome || resolved.nome).trim().toUpperCase();
+          const palavras = termos.split(/\s+/).slice(0, 3).join(' ');
+
+          const { data } = await supabase
+            .from("produtos")
+            .select("id, nome")
+            .eq("ativo", true)
+            .eq("categoria_id", resolved.categoria_id)
+            .neq("id", resolved.id)
+            .ilike("nome", `%${palavras}%`)
+            .limit(5);
+
+          return { produtoId: resolved.id, nomeOriginal: resolved.nome, similares: data ?? [] };
+        })
+      );
+
+      // Para cada produto com fallback, mapear similar → preço nos mercados
+      const similarIds = new Set<number>();
+      for (const r of resultados) {
+        for (const s of r.similares) similarIds.add(s.id);
+      }
+
+      // Buscar preços dos similares no mesmo período
+      let precosSimilares: any[] = [];
+      if (similarIds.size > 0) {
+        const { data } = await supabase
+          .from("precos")
+          .select("produto_id, supermercado_id, preco")
+          .in("produto_id", [...similarIds])
+          .gte("data_coleta", trintaDiasAtras);
+        if (data) precosSimilares = data;
+      }
+
+      // Indexar preços similares por produto + mercado
+      const similarPriceMap: Record<string, number> = {};
+      for (const p of precosSimilares) {
+        const key = `${p.produto_id}_${p.supermercado_id}`;
+        if (similarPriceMap[key] === undefined || p.preco < similarPriceMap[key]) {
+          similarPriceMap[key] = p.preco;
+        }
+      }
+
+      // Segunda passada: preencher fallbacks nos mercados faltantes
+      for (const r of resultados) {
+        for (const mercado of mercados) {
+          const jaTem = acc[mercado.id].produtos.some(
+            (p: any) => p.nome === fallbacks.find(f => f.resolved.id === r.produtoId)?.produto.nome && !p.naoEncontrado
+          );
+          if (jaTem) continue;
+
+          // Encontrar primeiro similar com preço neste mercado
+          let encontrado = false;
+          for (const s of r.similares) {
+            const preco = similarPriceMap[`${s.id}_${mercado.id}`];
+            if (preco && preco > 0) {
+              encontrado = true;
+              acc[mercado.id].total += preco * (fallbacks.find(f => f.resolved.id === r.produtoId)?.produto.quantidade || 1);
+              acc[mercado.id].itens++;
+              // Substituir o placeholder (último push de naoEncontrado)
+              const placeholderIdx = acc[mercado.id].produtos.findLastIndex(
+                (p: any) => p.naoEncontrado && p.nome === (fallbacks.find(f => f.resolved.id === r.produtoId)?.produto.nome)
+              );
+              if (placeholderIdx >= 0) {
+                acc[mercado.id].produtos[placeholderIdx] = {
+                  nome: fallbacks.find(f => f.resolved.id === r.produtoId)?.produto.nome,
+                  nomeEncontrado: s.nome,
+                  tipoBusca: 'similar',
+                  similarInfo: { nomeOriginal: r.nomeOriginal },
+                  quantidade: fallbacks.find(f => f.resolved.id === r.produtoId)?.produto.quantidade || 1,
+                  precoUnitario: preco,
+                  subtotal: preco * (fallbacks.find(f => f.resolved.id === r.produtoId)?.produto.quantidade || 1),
+                  naoEncontrado: false,
+                };
+              }
+              break;
+            }
           }
         }
       }
