@@ -193,18 +193,24 @@ export async function POST(req: NextRequest) {
     if (fallbacks.length > 0) {
       const resultados = await Promise.all(
         fallbacks.map(async ({ produto, resolved }) => {
-          // Extrai termos-chave do nome do produto (primeiras 3 palavras)
+          // Tokeniza o nome: busca cada palavra separada com AND
+          // "FEIJAO CAMIL BRANCO 500G" → ILIKE %FEIJAO% AND %CAMIL% AND %500%
+          // Assim pega "FEIJAO CAMIL BCO 500G" mesmo com abreviações
           const termos = (produto.nome || resolved.nome).trim().toUpperCase();
-          const palavras = termos.split(/\s+/).slice(0, 3).join(' ');
+          const palavras = termos.split(/\s+/).filter(p => p.length >= 2).slice(0, 4);
 
-          const { data } = await supabase
+          let query = supabase
             .from("produtos")
             .select("id, nome")
             .eq("ativo", true)
             .eq("categoria_id", resolved.categoria_id)
-            .neq("id", resolved.id)
-            .ilike("nome", `%${palavras}%`)
-            .limit(5);
+            .neq("id", resolved.id);
+
+          for (const p of palavras) {
+            query = query.ilike("nome", `%${p}%`);
+          }
+
+          const { data } = await query.limit(5);
 
           return { produtoId: resolved.id, nomeOriginal: resolved.nome, similares: data ?? [] };
         })
