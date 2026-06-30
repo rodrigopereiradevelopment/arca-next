@@ -4,7 +4,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green?logo=supabase)](https://supabase.com)
-![Version](https://img.shields.io/badge/version-1.1.5-green)
+![Version](https://img.shields.io/badge/version-1.2.0-green)
 
 API backend do ecossistema **ARCA** — ponte entre o banco de dados (Supabase/MongoDB) e o aplicativo mobile. Gerencia catálogo de produtos, preços, mercados, usuários, autenticação, notificações, tickets, upload e mais.
 
@@ -412,5 +412,15 @@ TCC — ETEC Pedro Ferreira Alves — Mogi Mirim/SP — 2025/2026
 | Felix Renato Marques Junior | Desenvolvedor |
 
 **Orientador:** Prof. Maurício Aparecido das Neves
+
+---
+
+## 📋 Changelog
+
+### v1.2.0 (29/jun/2026)
+- **Search otimizado**: substitui RPC `buscar_produtos` (trigram timeout 57014) por ILIKE direto com índice GIN — de timeout 3s+ para ~120ms
+- **Preços no search**: corrige array `precos[]` vazio no response da busca
+- **Comparação acelerada**: fallback de similar substituído de RPC `buscar_produtos_similares` (1 chamada por mercado) para ILIKE tokenizado (1 chamada por produto) + cache de preços — de ~40s para ~380ms
+- **Fallback tokenizado**: busca por palavras-chave AND (`ILIKE %FEIJAO% AND %CAMIL%`) em vez de frase completa, achando variações e abreviações
 
 📝 **Licença:** MIT
