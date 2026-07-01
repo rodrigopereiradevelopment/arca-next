@@ -543,13 +543,14 @@ export async function POST(req: NextRequest) {
           .slice(0, 8)
           .map(w => `nome.ilike.%${w}%`)
           .join(',');
-        const { data: catMatch } = await supabase
+        const { data: catTodos } = await supabase
           .from("produtos")
           .select("id, nome")
           .eq("categoria_id", grupo.cat)
-          .not("id", "in", `(${[...excluirIds].join(',')})`)
           .or(orConditions)
           .limit(50);
+
+        const catMatch = (catTodos || []).filter(p => !excluirIds.has(p.id));
 
         if (!catMatch || catMatch.length === 0) continue;
 
