@@ -539,7 +539,6 @@ export async function POST(req: NextRequest) {
           .limit(100);
 
         const catProdutos = (todosCat || []).filter(p => !excluirIds.has(p.id));
-
         if (!catProdutos || catProdutos.length === 0) continue;
 
         const idsCat = catProdutos.map(p => p.id);
@@ -563,30 +562,45 @@ export async function POST(req: NextRequest) {
         });
 
         const usado = new Set<number>();
-        for (const sub of substitutos) {
-          if (usado.has(sub.produto_id)) continue;
-          const produtoPendente = grupo.produtos.find(p => !usado.has(p.produtoId));
-          if (!produtoPendente) break;
-          usado.add(sub.produto_id);
-          usado.add(produtoPendente.produtoId);
+        for (const ps of grupo.produtos) {
+          if (usado.has(ps.produtoId)) continue;
+          // Extrair palavras-chave do produto original (>=4 chars)
+          const palavrasOriginais = ps.nome.toUpperCase().split(/\s+/).filter(w => w.length >= 4);
+          if (palavrasOriginais.length === 0) continue;
 
-          const nomeProduto = catNomeMap.get(sub.produto_id) || '';
-          const placeholderIdx = acc[grupo.mercadoId].produtos.findLastIndex(
-            (px: any) => px.naoEncontrado && px.nome === produtoPendente.nome
+          // Encontrar o substituto mais barato que compartilhe pelo menos uma palavra
+          let melhor: { id: number; nome: string; preco: number } | null = null;
+          for (const sub of substitutos) {
+            if (usado.has(sub.produto_id)) continue;
+            const nomeSub = catNomeMap.get(sub.produto_id) || '';
+            const palavrasSub = nomeSub.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 4);
+            const temPalavraComum = palavrasOriginais.some(w => palavrasSub.includes(w));
+            if (temPalavraComum) {
+              melhor = { id: sub.produto_id, nome: nomeSub, preco: sub.preco };
+              usado.add(sub.produto_id);
+              break;
+            }
+          }
+
+          if (!melhor) continue;
+          usado.add(ps.produtoId);
+
+          const placeholderIdx = acc[ps.mercadoId].produtos.findLastIndex(
+            (px: any) => px.naoEncontrado && px.nome === ps.nome
           );
           if (placeholderIdx < 0) continue;
 
-          acc[grupo.mercadoId].produtos[placeholderIdx] = {
-            nome: produtoPendente.nome,
-            nomeEncontrado: nomeProduto,
+          acc[ps.mercadoId].produtos[placeholderIdx] = {
+            nome: ps.nome,
+            nomeEncontrado: melhor.nome,
             tipoBusca: 'substituto',
-            quantidade: produtos.find(p => p.nome === produtoPendente.nome)?.quantidade || 1,
-            precoUnitario: sub.preco,
-            subtotal: sub.preco * (produtos.find(p => p.nome === produtoPendente.nome)?.quantidade || 1),
+            quantidade: produtos.find(p => p.nome === ps.nome)?.quantidade || 1,
+            precoUnitario: melhor.preco,
+            subtotal: melhor.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1),
             naoEncontrado: false,
           };
-          acc[grupo.mercadoId].itens++;
-          acc[grupo.mercadoId].total += sub.preco * (produtos.find(p => p.nome === produtoPendente.nome)?.quantidade || 1);
+          acc[ps.mercadoId].itens++;
+          acc[ps.mercadoId].total += melhor.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1);
         }
       }
     }
