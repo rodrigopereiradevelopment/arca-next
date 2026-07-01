@@ -228,13 +228,22 @@ export async function POST(req: NextRequest) {
             if (vistos.has(fb.resolved.id)) return null;
             vistos.add(fb.resolved.id);
             const termo = (fb.produto.nome || fb.resolved.nome).trim().toUpperCase();
-            const palavras = termo.split(/\s+/).filter(p => p.length >= 3).slice(0, 3);
-            if (palavras.length < 2) return null;
+            const todas = termo.split(/\s+/).filter(p => p.length >= 3);
+            const top2 = todas.sort((a, b) => b.length - a.length).slice(0, 2);
+            if (top2.length < 2) return null;
 
+            // Tenta com 2 palavras (mais especifico), se nada achar cai pra 1 palavra
+            let data: any[] | null = null;
             let q = supabase.from("produtos").select("id, nome").neq("id", fb.resolved.id);
-            for (const p of palavras) q = q.ilike("nome", `%${p}%`);
-            const { data } = await q.limit(10);
-            if (!data || data.length === 0) return null;
+            for (const p of top2) q = q.ilike("nome", `%${p}%`);
+            const r1 = await q.limit(10);
+            if (r1.data && r1.data.length > 0) { data = r1.data; }
+            else {
+              const q2 = supabase.from("produtos").select("id, nome").neq("id", fb.resolved.id).ilike("nome", `%${top2[0]}%`);
+              const r2 = await q2.limit(10);
+              if (r2.data && r2.data.length > 0) data = r2.data;
+            }
+            if (!data) return null;
 
             return { produtoId: fb.resolved.id, nomeOriginal: fb.resolved.nome, similares: data.map(s => ({ id: s.id, nome: s.nome })) };
           })
