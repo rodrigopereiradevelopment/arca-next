@@ -338,6 +338,71 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 4c. Slow path: trigram RPC para pares (produto, mercado) ainda sem preço
+    const buracos: { nome: string; nomeOriginal: string; produtoId: number; categoria_id: number | null; peso_volume: string | null; mercadoId: number }[] = [];
+    for (const mercado of mercados) {
+      for (const p of acc[mercado.id].produtos) {
+        if (!p.naoEncontrado) continue;
+        const resolved = produtosResolvidos.find(r => r.produto.nome === p.nome);
+        if (!resolved) continue;
+        buracos.push({
+          nome: p.nome,
+          nomeOriginal: resolved.resolved.nome,
+          produtoId: resolved.resolved.id,
+          categoria_id: resolved.resolved.categoria_id,
+          peso_volume: resolved.resolved.peso_volume,
+          mercadoId: mercado.id,
+        });
+      }
+    }
+
+    if (buracos.length > 0) {
+      const CONCORRENCIA = 15;
+      const rpcResults: { nome: string; nomeOriginal: string; mercadoId: number; encontrado: any }[] = [];
+
+      async function executarSlowPath(buraco: typeof buracos[0]) {
+        try {
+          const { data } = await supabase.rpc("buscar_produtos_similares", {
+            p_nome: buraco.nomeOriginal,
+            p_categoria_id: buraco.categoria_id,
+            p_peso: buraco.peso_volume || null,
+            p_preco_ref: null,
+            p_mercado_id: buraco.mercadoId,
+            p_produto_id: buraco.produtoId,
+          });
+          if (data && data.length > 0) return { ...buraco, encontrado: data[0] };
+        } catch { /* RPC pode timeoutar no free tier, ignora */ }
+        return null;
+      }
+
+      for (let i = 0; i < buracos.length; i += CONCORRENCIA) {
+        const batch = buracos.slice(i, i + CONCORRENCIA);
+        const batchResults = await Promise.all(batch.map(executarSlowPath));
+        for (const r of batchResults) { if (r) rpcResults.push(r); }
+      }
+
+      for (const sr of rpcResults) {
+        const { nome, nomeOriginal, mercadoId, encontrado } = sr;
+        const produto = produtos.find(p => p.nome === nome);
+        const placeholderIdx = acc[mercadoId].produtos.findLastIndex(
+          (p: any) => p.naoEncontrado && p.nome === nome
+        );
+        if (placeholderIdx < 0) continue;
+        acc[mercadoId].produtos[placeholderIdx] = {
+          nome,
+          nomeEncontrado: encontrado.nome_produto,
+          tipoBusca: 'trigram',
+          similarInfo: { nomeOriginal },
+          quantidade: produto?.quantidade || 1,
+          precoUnitario: encontrado.preco,
+          subtotal: encontrado.preco * (produto?.quantidade || 1),
+          naoEncontrado: false,
+        };
+        acc[mercadoId].itens++;
+        acc[mercadoId].total += encontrado.preco * (produto?.quantidade || 1);
+      }
+    }
+
     // ── 5. Montar resposta ────────────────────────────────────────────
     const resposta = mercados.map((m) => ({
       id: m.id,
