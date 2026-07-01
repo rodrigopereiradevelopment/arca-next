@@ -531,14 +531,14 @@ export async function POST(req: NextRequest) {
       }
 
       for (const [, grupo] of grupos) {
-        const excluirIds = [...new Set(grupo.produtos.map(p => p.produtoId))];
-        // Primeiro busca produtos da categoria, depois precos no mercado
-        const { data: catProdutos } = await supabase
+        const excluirIds = new Set(grupo.produtos.map(p => p.produtoId));
+        const { data: todosCat } = await supabase
           .from("produtos")
           .select("id, nome")
           .eq("categoria_id", grupo.cat)
-          .not("id", "in", `(${excluirIds.join(",")})`)
-          .limit(50);
+          .limit(100);
+
+        const catProdutos = (todosCat || []).filter(p => !excluirIds.has(p.id));
 
         if (!catProdutos || catProdutos.length === 0) continue;
 
