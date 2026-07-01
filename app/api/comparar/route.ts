@@ -189,14 +189,16 @@ export async function POST(req: NextRequest) {
     if (fallbacks.length > 0) {
       const fallbackIds = fallbacks.map(f => f.resolved.id);
 
+      // Tenta produtos_equivalentes primeiro (rápido, tabela pré-computada)
       const [eqResA, eqResB] = await Promise.all([
-        supabase.from("produtos_equivalentes").select("produto_id_a, produto_id_b").in("produto_id_a", fallbackIds).gte("score", 0.4),
-        supabase.from("produtos_equivalentes").select("produto_id_a, produto_id_b").in("produto_id_b", fallbackIds).gte("score", 0.4),
+        supabase.from("produtos_equivalentes").select("produto_id_a, produto_id_b").in("produto_id_a", fallbackIds).gte("score", 0.3),
+        supabase.from("produtos_equivalentes").select("produto_id_a, produto_id_b").in("produto_id_b", fallbackIds).gte("score", 0.3),
       ]);
       const equivalentes = [...(eqResA.data || []), ...(eqResB.data || [])];
 
       const resultados: { produtoId: number; nomeOriginal: string; similares: { id: number; nome: string }[] }[] = [];
       const similarIds = new Set<number>();
+      const fallbackIdsComMatch = new Set<number>();
 
       if (equivalentes) {
         for (const fbId of fallbackIds) {
@@ -206,6 +208,7 @@ export async function POST(req: NextRequest) {
             if (e.produto_id_b === fbId) matchIds.add(e.produto_id_a);
           }
           if (matchIds.size > 0) {
+            fallbackIdsComMatch.add(fbId);
             for (const id of matchIds) similarIds.add(id);
             resultados.push({
               produtoId: fbId,
@@ -214,19 +217,43 @@ export async function POST(req: NextRequest) {
             });
           }
         }
+      }
 
-        // Buscar nomes dos equivalentes
-        if (similarIds.size > 0) {
-          const { data: nomes } = await supabase
-            .from("produtos")
-            .select("id, nome")
-            .in("id", [...similarIds]);
-          if (nomes) {
-            const nomeMap = new Map(nomes.map(n => [n.id, n.nome]));
-            for (const r of resultados) {
-              for (const s of r.similares) {
-                s.nome = nomeMap.get(s.id) || '';
-              }
+      // Fallback ILIKE para produtos sem match na tabela (mais abrangente)
+      const semMatch = fallbacks.filter(f => !fallbackIdsComMatch.has(f.resolved.id));
+      if (semMatch.length > 0) {
+        const ilikeResults = await Promise.all(
+          semMatch.map(async ({ produto, resolved }) => {
+            const termo = (produto.nome || resolved.nome).trim().toUpperCase();
+            const palavras = termo.split(/\s+/).filter(p => p.length >= 2).slice(0, 4);
+
+            let query = supabase.from("produtos").select("id, nome")
+              .eq("categoria_id", resolved.categoria_id).neq("id", resolved.id);
+            for (const p of palavras) query = query.ilike("nome", `%${p}%`);
+
+            const { data } = await query.limit(5);
+            return { produtoId: resolved.id, nomeOriginal: resolved.nome, similares: (data ?? []).map(s => ({ id: s.id, nome: s.nome })) };
+          })
+        );
+        for (const r of ilikeResults) {
+          if (r.similares.length > 0) {
+            resultados.push(r);
+            for (const s of r.similares) similarIds.add(s.id);
+          }
+        }
+      }
+
+      // Buscar nomes dos equivalentes (se ainda não foram preenchidos pelo ILIKE)
+      if (similarIds.size > 0) {
+        const { data: nomes } = await supabase
+          .from("produtos")
+          .select("id, nome")
+          .in("id", [...similarIds]);
+        if (nomes) {
+          const nomeMap = new Map(nomes.map(n => [n.id, n.nome]));
+          for (const r of resultados) {
+            for (const s of r.similares) {
+              if (!s.nome) s.nome = nomeMap.get(s.id) || '';
             }
           }
         }
