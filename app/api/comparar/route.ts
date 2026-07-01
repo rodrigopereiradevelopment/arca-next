@@ -220,7 +220,23 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Fallback ILIKE — busca sem filtro de categoria (mais abrangente)
+      // Fallback ILIKE progressivo — tenta com todas as palavras,
+      // depois relaxa (sem categoria, menos palavras) ate achar algo
+      async function buscarIlike(resolved: { id: number; nome: string }, palavras: string[]): Promise<{ id: number; nome: string }[]> {
+        if (palavras.length < 2) return [];
+        for (let n = palavras.length; n >= 2; n--) {
+          const combo = palavras.slice(0, n);
+          let q = supabase.from("produtos").select("id, nome").neq("id", resolved.id);
+          for (const p of combo) q = q.ilike("nome", `%${p}%`);
+          const { data } = await q.limit(10);
+          if (data && data.length > 0) return data;
+        }
+        // Ultimo recurso: so a palavra mais longa
+        const maior = palavras.reduce((a, b) => a.length >= b.length ? a : b);
+        const { data } = await supabase.from("produtos").select("id, nome").neq("id", resolved.id).ilike("nome", `%${maior}%`).limit(10);
+        return data || [];
+      }
+
       if (fallbacks.length > 0) {
         const vistos = new Set<number>();
         const ilikeResults = await Promise.all(
@@ -228,30 +244,20 @@ export async function POST(req: NextRequest) {
             if (vistos.has(fb.resolved.id)) return null;
             vistos.add(fb.resolved.id);
             const termo = (fb.produto.nome || fb.resolved.nome).trim().toUpperCase();
-            const todas = termo.split(/\s+/).filter(p => p.length >= 3);
-            const top2 = todas.sort((a, b) => b.length - a.length).slice(0, 2);
-            if (top2.length < 2) return null;
-
-            // Tenta com 2 palavras (mais especifico), se nada achar cai pra 1 palavra
-            let data: any[] | null = null;
-            let q = supabase.from("produtos").select("id, nome").neq("id", fb.resolved.id);
-            for (const p of top2) q = q.ilike("nome", `%${p}%`);
-            const r1 = await q.limit(10);
-            if (r1.data && r1.data.length > 0) { data = r1.data; }
-            else {
-              const q2 = supabase.from("produtos").select("id, nome").neq("id", fb.resolved.id).ilike("nome", `%${top2[0]}%`);
-              const r2 = await q2.limit(10);
-              if (r2.data && r2.data.length > 0) data = r2.data;
-            }
-            if (!data) return null;
-
-            return { produtoId: fb.resolved.id, nomeOriginal: fb.resolved.nome, similares: data.map(s => ({ id: s.id, nome: s.nome })) };
+            const palavras = termo.split(/\s+/).filter(p => p.length >= 3).slice(0, 5);
+            if (palavras.length < 2) return null;
+            const similares = await buscarIlike(fb.resolved, palavras);
+            if (similares.length === 0) return null;
+            return { produtoId: fb.resolved.id, nomeOriginal: fb.resolved.nome, similares: similares.map(s => ({ id: s.id, nome: s.nome })) };
           })
         );
         for (const r of ilikeResults) {
           if (r && r.similares.length > 0) {
-            resultados.push(r);
-            for (const s of r.similares) similarIds.add(s.id);
+            const jaExiste = resultados.some(ex => ex.produtoId === r.produtoId && ex.similares.some(s => s.id === r.similares[0].id));
+            if (!jaExiste) {
+              resultados.push(r);
+              for (const s of r.similares) similarIds.add(s.id);
+            }
           }
         }
       }
