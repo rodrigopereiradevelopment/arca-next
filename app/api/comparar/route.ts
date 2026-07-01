@@ -59,15 +59,16 @@ export async function POST(req: NextRequest) {
       if (porId) for (const p of porId) resolvedMap[String(p.id)] = p;
     }
 
-    // Buscar por nome (paralelo — ILIKE com índice GIN é rápido)
+    // Buscar por nome (tokenizado — AND por palavra, cobre variações tipo "FEIJAO CAMIL 500G" vs "FEIJAO PRETO CAMIL 500G")
     if (nomesUnicos.length > 0) {
       const resultados = await Promise.all(
         nomesUnicos.map(async (nome) => {
-          const { data } = await supabase
-            .from("produtos")
-            .select("id, nome, categoria_id, peso_volume")
-            .ilike("nome", `%${nome}%`)
-            .limit(1);
+          const palavras = nome.split(/\s+/).filter(p => p.length >= 2).slice(0, 5);
+          if (palavras.length === 0) return { nome, produto: null };
+
+          let query = supabase.from("produtos").select("id, nome, categoria_id, peso_volume");
+          for (const p of palavras) query = query.ilike("nome", `%${p}%`);
+          const { data } = await query.limit(1);
           return { nome, produto: data?.[0] || null };
         })
       );
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest) {
     }
     for (const v of Object.values(resolvedMap)) allIds.add(v.id);
 
-    const trintaDiasAtras = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const diasLimite = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
     const priceMap: Record<string, number> = {};
     const dateMap: Record<string, string> = {};
 
@@ -92,7 +93,7 @@ export async function POST(req: NextRequest) {
         .from("precos")
         .select("produto_id, supermercado_id, preco, data_coleta")
         .in("produto_id", [...allIds])
-        .gte("data_coleta", trintaDiasAtras);
+        .gte("data_coleta", diasLimite);
 
       if (precos) {
         for (const p of precos) {
@@ -191,10 +192,11 @@ export async function POST(req: NextRequest) {
 
       // Tenta produtos_equivalentes primeiro (rápido, tabela pré-computada)
       const [eqResA, eqResB] = await Promise.all([
-        supabase.from("produtos_equivalentes").select("produto_id_a, produto_id_b").in("produto_id_a", fallbackIds).gte("score", 0.3),
-        supabase.from("produtos_equivalentes").select("produto_id_a, produto_id_b").in("produto_id_b", fallbackIds).gte("score", 0.3),
+        supabase.from("produtos_equivalentes").select("produto_id_a, produto_id_b, score").in("produto_id_a", fallbackIds).gte("score", 0.3).order("score", { ascending: false }),
+        supabase.from("produtos_equivalentes").select("produto_id_a, produto_id_b, score").in("produto_id_b", fallbackIds).gte("score", 0.3).order("score", { ascending: false }),
       ]);
-      const equivalentes = [...(eqResA.data || []), ...(eqResB.data || [])];
+      const equivalentes = [...(eqResA.data || []), ...(eqResB.data || [])]
+        .sort((a, b) => (b.score || 0) - (a.score || 0));
 
       const resultados: { produtoId: number; nomeOriginal: string; similares: { id: number; nome: string }[] }[] = [];
       const similarIds = new Set<number>();
@@ -228,7 +230,8 @@ export async function POST(req: NextRequest) {
             const palavras = termo.split(/\s+/).filter(p => p.length >= 2).slice(0, 4);
 
             let query = supabase.from("produtos").select("id, nome")
-              .eq("categoria_id", resolved.categoria_id).neq("id", resolved.id);
+              .neq("id", resolved.id);
+            if (resolved.categoria_id) query = query.eq("categoria_id", resolved.categoria_id);
             for (const p of palavras) query = query.ilike("nome", `%${p}%`);
 
             const { data } = await query.limit(5);
@@ -266,7 +269,7 @@ export async function POST(req: NextRequest) {
           .from("precos")
           .select("produto_id, supermercado_id, preco")
           .in("produto_id", [...similarIds])
-          .gte("data_coleta", trintaDiasAtras);
+          .gte("data_coleta", diasLimite);
         if (data) precosSimilares = data;
       }
 
