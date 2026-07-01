@@ -24,7 +24,7 @@ export async function OPTIONS() {
 }
 
 export async function GET(req: NextRequest) {
-  const token = req.nextUrl.searchParams.get('token');
+  const token = req.headers.get('authorization')?.replace('Bearer ', '') || req.nextUrl.searchParams.get('token');
   if (!token) return NextResponse.json({ erro: 'Token obrigatório' }, { status: 401 });
   const userId = await getUserId(token);
   if (!userId) return NextResponse.json({ erro: 'Token inválido' }, { status: 401 });

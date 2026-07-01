@@ -180,8 +180,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4b. Fallback: buscar similares via ILIKE (1 query por produto, não por mercado)
-    //     O índice GIN idx_produtos_nome_trgm torna ILIKE rápido (~120ms)
+    // 4b. Fallback: buscar equivalentes via tabela pré-computada
+    //     produtos_equivalentes pré-populada com trigram + marca + categoria
     const fallbacks = produtosResolvidos.filter(({ resolved }) => {
       for (const m of mercados) {
         const preco = priceMap[`${resolved.id}_${m.id}`];
@@ -191,38 +191,52 @@ export async function POST(req: NextRequest) {
     });
 
     if (fallbacks.length > 0) {
-      const resultados = await Promise.all(
-        fallbacks.map(async ({ produto, resolved }) => {
-          // Tokeniza o nome: busca cada palavra separada com AND
-          // "FEIJAO CAMIL BRANCO 500G" → ILIKE %FEIJAO% AND %CAMIL% AND %500%
-          // Assim pega "FEIJAO CAMIL BCO 500G" mesmo com abreviações
-          const termos = (produto.nome || resolved.nome).trim().toUpperCase();
-          const palavras = termos.split(/\s+/).filter(p => p.length >= 2).slice(0, 4);
+      const fallbackIds = fallbacks.map(f => f.resolved.id);
 
-          let query = supabase
+      const [eqResA, eqResB] = await Promise.all([
+        supabase.from("produtos_equivalentes").select("produto_id_a, produto_id_b").in("produto_id_a", fallbackIds).gte("score", 0.4),
+        supabase.from("produtos_equivalentes").select("produto_id_a, produto_id_b").in("produto_id_b", fallbackIds).gte("score", 0.4),
+      ]);
+      const equivalentes = [...(eqResA.data || []), ...(eqResB.data || [])];
+
+      const resultados: { produtoId: number; nomeOriginal: string; similares: { id: number; nome: string }[] }[] = [];
+      const similarIds = new Set<number>();
+
+      if (equivalentes) {
+        for (const fbId of fallbackIds) {
+          const matchIds = new Set<number>();
+          for (const e of equivalentes) {
+            if (e.produto_id_a === fbId) matchIds.add(e.produto_id_b);
+            if (e.produto_id_b === fbId) matchIds.add(e.produto_id_a);
+          }
+          if (matchIds.size > 0) {
+            for (const id of matchIds) similarIds.add(id);
+            resultados.push({
+              produtoId: fbId,
+              nomeOriginal: fallbacks.find(f => f.resolved.id === fbId)?.resolved.nome || '',
+              similares: [...matchIds].map(id => ({ id, nome: '' })),
+            });
+          }
+        }
+
+        // Buscar nomes dos equivalentes
+        if (similarIds.size > 0) {
+          const { data: nomes } = await supabase
             .from("produtos")
             .select("id, nome")
-            .eq("ativo", true)
-            .eq("categoria_id", resolved.categoria_id)
-            .neq("id", resolved.id);
-
-          for (const p of palavras) {
-            query = query.ilike("nome", `%${p}%`);
+            .in("id", [...similarIds]);
+          if (nomes) {
+            const nomeMap = new Map(nomes.map(n => [n.id, n.nome]));
+            for (const r of resultados) {
+              for (const s of r.similares) {
+                s.nome = nomeMap.get(s.id) || '';
+              }
+            }
           }
-
-          const { data } = await query.limit(5);
-
-          return { produtoId: resolved.id, nomeOriginal: resolved.nome, similares: data ?? [] };
-        })
-      );
-
-      // Para cada produto com fallback, mapear similar → preço nos mercados
-      const similarIds = new Set<number>();
-      for (const r of resultados) {
-        for (const s of r.similares) similarIds.add(s.id);
+        }
       }
 
-      // Buscar preços dos similares no mesmo período
+      // Buscar preços dos equivalentes no mesmo período
       let precosSimilares: any[] = [];
       if (similarIds.size > 0) {
         const { data } = await supabase
@@ -250,7 +264,6 @@ export async function POST(req: NextRequest) {
           );
           if (jaTem) continue;
 
-          // Encontrar primeiro similar com preço neste mercado
           let encontrado = false;
           for (const s of r.similares) {
             const preco = similarPriceMap[`${s.id}_${mercado.id}`];
@@ -258,7 +271,6 @@ export async function POST(req: NextRequest) {
               encontrado = true;
               acc[mercado.id].total += preco * (fallbacks.find(f => f.resolved.id === r.produtoId)?.produto.quantidade || 1);
               acc[mercado.id].itens++;
-              // Substituir o placeholder (último push de naoEncontrado)
               const placeholderIdx = acc[mercado.id].produtos.findLastIndex(
                 (p: any) => p.naoEncontrado && p.nome === (fallbacks.find(f => f.resolved.id === r.produtoId)?.produto.nome)
               );
