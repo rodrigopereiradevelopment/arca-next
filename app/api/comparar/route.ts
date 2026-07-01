@@ -198,8 +198,8 @@ export async function POST(req: NextRequest) {
         const eqResults = await Promise.all(
           fallbackIds.map(async (fbId) => {
             const [a, b] = await Promise.all([
-              supabase.from("produtos_equivalentes").select("produto_id_b, score").eq("produto_id_a", fbId).gte("score", 0.3).order("score", { ascending: false }).limit(20),
-              supabase.from("produtos_equivalentes").select("produto_id_a, score").eq("produto_id_b", fbId).gte("score", 0.3).order("score", { ascending: false }).limit(20),
+              supabase.from("produtos_equivalentes").select("produto_id_b, score").eq("produto_id_a", fbId).gte("score", 0.3).order("score", { ascending: false }).limit(10),
+              supabase.from("produtos_equivalentes").select("produto_id_a, score").eq("produto_id_b", fbId).gte("score", 0.3).order("score", { ascending: false }).limit(10),
             ]);
             return { fbId, matchIds: [...new Set([...(a.data || []).map(x => x.produto_id_b), ...(b.data || []).map(x => x.produto_id_a)])] };
           })
