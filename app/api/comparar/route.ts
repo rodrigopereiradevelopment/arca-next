@@ -150,11 +150,9 @@ export async function POST(req: NextRequest) {
       }
       produtosResolvidos.push({ produto, resolved });
 
-      let temExato = false;
       for (const mercado of mercados) {
         const preco = priceMap[`${resolved.id}_${mercado.id}`];
         if (preco !== undefined && preco > 0) {
-          temExato = true;
           acc[mercado.id].total += preco * quantidade;
           acc[mercado.id].itens++;
           acc[mercado.id].produtos.push({
@@ -166,16 +164,14 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Preencher mercados sem preço exato com placeholder (substituído no fallback)
-      if (!temExato) {
-        for (const mercado of mercados) {
-          const preco = priceMap[`${resolved.id}_${mercado.id}`];
-          if (!preco || preco <= 0) {
-            acc[mercado.id].produtos.push({
-              nome: produto.nome, nomeEncontrado: null, tipoBusca: null,
-              quantidade, precoUnitario: 0, subtotal: 0, naoEncontrado: true,
-            });
-          }
+      // Placeholder para mercados sem preço (sempre — garante N entradas/mercado)
+      for (const mercado of mercados) {
+        const preco = priceMap[`${resolved.id}_${mercado.id}`];
+        if (!preco || preco <= 0) {
+          acc[mercado.id].produtos.push({
+            nome: produto.nome, nomeEncontrado: null, tipoBusca: null,
+            quantidade, precoUnitario: 0, subtotal: 0, naoEncontrado: true,
+          });
         }
       }
     }
