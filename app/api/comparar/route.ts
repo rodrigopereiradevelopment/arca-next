@@ -608,40 +608,25 @@ export async function POST(req: NextRequest) {
         );
         if (pendentes.length === 0) continue;
 
-        const { data: catTodos } = await supabase
-          .from("produtos")
-          .select("id, nome")
-          .eq("categoria_id", grupo.cat)
-          .limit(100);
-
-        const catFiltrados = (catTodos || []).filter(p => !excluirIds.has(p.id));
-        if (catFiltrados.length === 0) continue;
-
-        const idsCat = catFiltrados.map(p => p.id);
-        const catNomeMap = new Map(catFiltrados.map(p => [p.id, p.nome]));
-        const { data: precosFallback } = await supabase
+        const { data: baratos } = await supabase
           .from("precos")
-          .select("produto_id, preco")
-          .in("produto_id", idsCat)
+          .select("produto_id, preco, produtos!inner(id, nome)")
+          .eq("produtos.categoria_id", grupo.cat)
           .eq("supermercado_id", grupo.mercadoId)
           .gte("data_coleta", diasLimite)
           .gt("preco", 0)
-          .order("preco", { ascending: true });
+          .order("preco", { ascending: true })
+          .limit(10);
 
-        if (!precosFallback || precosFallback.length === 0) continue;
-
-        const visto = new Set<number>();
-        const baratos = precosFallback.filter(p => {
-          if (visto.has(p.produto_id)) return false;
-          visto.add(p.produto_id);
-          return true;
-        });
+        const precosValidos = (baratos || []).filter(p => !excluirIds.has(p.produto_id));
+        if (precosValidos.length === 0) continue;
 
         const usado = new Set<number>();
+        let subIdx = 0;
         for (const ps of pendentes) {
           if (usado.has(ps.produtoId)) continue;
-          const sub = baratos.find(s => !usado.has(s.produto_id));
-          if (!sub) { usado.add(ps.produtoId); continue; }
+          if (subIdx >= precosValidos.length) { usado.add(ps.produtoId); continue; }
+          const sub = precosValidos[subIdx++];
           usado.add(sub.produto_id);
           usado.add(ps.produtoId);
 
@@ -650,7 +635,7 @@ export async function POST(req: NextRequest) {
           );
           if (idx < 0) continue;
           acc[ps.mercadoId].produtos[idx] = {
-            nome: ps.nome, nomeEncontrado: catNomeMap.get(sub.produto_id) || '',
+            nome: ps.nome, nomeEncontrado: (sub.produtos as any)?.nome || '',
             tipoBusca: 'substituto_amplo',
             quantidade: produtos.find(p => p.nome === ps.nome)?.quantidade || 1,
             precoUnitario: sub.preco, subtotal: sub.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1),
