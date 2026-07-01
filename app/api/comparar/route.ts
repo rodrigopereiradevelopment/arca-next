@@ -338,68 +338,105 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4c. Slow path: trigram RPC para pares (produto, mercado) ainda sem preço
-    const buracos: { nome: string; nomeOriginal: string; produtoId: number; categoria_id: number | null; peso_volume: string | null; mercadoId: number }[] = [];
+    // 4c. Slow path: ILIKE progressivo + filtro por mercado
+    //     Para cada produto ainda sem preco, busca via ILIKE (indice GIN)
+    //     e filtra por presenca no mercado alvo
+    const buracosPorProduto = new Map<number, { nome: string; resolved: typeof produtosResolvidos[0]['resolved']; nomeOriginal: string }>();
     for (const mercado of mercados) {
       for (const p of acc[mercado.id].produtos) {
         if (!p.naoEncontrado) continue;
         const resolved = produtosResolvidos.find(r => r.produto.nome === p.nome);
         if (!resolved) continue;
-        buracos.push({
-          nome: p.nome,
-          nomeOriginal: resolved.resolved.nome,
-          produtoId: resolved.resolved.id,
-          categoria_id: resolved.resolved.categoria_id,
-          peso_volume: resolved.resolved.peso_volume,
-          mercadoId: mercado.id,
-        });
+        if (!buracosPorProduto.has(resolved.resolved.id)) {
+          buracosPorProduto.set(resolved.resolved.id, { nome: p.nome, resolved: resolved.resolved, nomeOriginal: resolved.produto.nome });
+        }
       }
     }
 
-    if (buracos.length > 0) {
-      const CONCORRENCIA = 15;
-      const rpcResults: { nome: string; nomeOriginal: string; mercadoId: number; encontrado: any }[] = [];
+    if (buracosPorProduto.size > 0) {
+      const slowResults: Map<string, { id: number; nome: string; preco: number }> = new Map();
 
-      async function executarSlowPath(buraco: typeof buracos[0]) {
-        try {
-          const { data } = await supabase.rpc("buscar_produtos_similares", {
-            p_nome: buraco.nomeOriginal,
-            p_categoria_id: buraco.categoria_id,
-            p_peso: buraco.peso_volume || null,
-            p_preco_ref: null,
-            p_mercado_id: buraco.mercadoId,
-            p_produto_id: buraco.produtoId,
-          });
-          if (data && data.length > 0) return { ...buraco, encontrado: data[0] };
-        } catch { /* RPC pode timeoutar no free tier, ignora */ }
-        return null;
+      for (const [produtoId, info] of buracosPorProduto) {
+        const termo = info.resolved.nome.trim().toUpperCase();
+        const palavras = termo.split(/\s+/).filter(w => w.length >= 3).slice(0, 5);
+        if (palavras.length < 2) continue;
+
+        let candidatos: { id: number; nome: string }[] = [];
+        for (let n = palavras.length; n >= 2; n--) {
+          const combo = palavras.slice(0, n);
+          let q = supabase.from("produtos").select("id, nome").neq("id", produtoId);
+          for (const w of combo) q = q.ilike("nome", `%${w}%`);
+          const { data } = await q.limit(20);
+          if (data && data.length > 0) { candidatos = data; break; }
+        }
+        if (candidatos.length === 0) {
+          const maior = palavras.reduce((a, b) => a.length >= b.length ? a : b);
+          const { data } = await supabase.from("produtos").select("id, nome").neq("id", produtoId).ilike("nome", `%${maior}%`).limit(20);
+          if (data) candidatos = data;
+        }
+        if (candidatos.length === 0) continue;
+
+        // Buscar precos em todos os mercados de uma vez
+        const ids = candidatos.map(x => x.id);
+        const { data: precosCandidatos } = await supabase
+          .from("precos")
+          .select("produto_id, supermercado_id, preco")
+          .in("produto_id", ids)
+          .gte("data_coleta", diasLimite);
+        if (!precosCandidatos || precosCandidatos.length === 0) continue;
+
+        // Agrupar precos por supermercado_id
+        const precosPorMercado: Record<number, Map<number, number>> = {};
+        for (const pc of precosCandidatos) {
+          if (!precosPorMercado[pc.supermercado_id]) precosPorMercado[pc.supermercado_id] = new Map();
+          if (!precosPorMercado[pc.supermercado_id].has(pc.produto_id)) {
+            precosPorMercado[pc.supermercado_id].set(pc.produto_id, pc.preco);
+          }
+        }
+
+        // Para cada candidato, verificar se existe em cada mercado que precisa
+        for (const cand of candidatos) {
+          for (const mercado of mercados) {
+            const key = `${produtoId}_${mercado.id}`;
+            if (slowResults.has(key)) continue;
+            const preco = precosPorMercado[mercado.id]?.get(cand.id);
+            if (preco && preco > 0) {
+              // Verificar se este produto ainda esta sem preco neste mercado
+              const temPlaceholder = acc[mercado.id].produtos.some(
+                (px: any) => px.naoEncontrado && px.nome === info.nomeOriginal
+              );
+              if (temPlaceholder) {
+                slowResults.set(key, { id: cand.id, nome: cand.nome, preco });
+              }
+            }
+          }
+          if (slowResults.size >= buracosPorProduto.size * mercados.length) break;
+        }
       }
 
-      for (let i = 0; i < buracos.length; i += CONCORRENCIA) {
-        const batch = buracos.slice(i, i + CONCORRENCIA);
-        const batchResults = await Promise.all(batch.map(executarSlowPath));
-        for (const r of batchResults) { if (r) rpcResults.push(r); }
-      }
+      // Aplicar resultados nos placeholders
+      for (const [key, encontrado] of slowResults) {
+        const [produtoIdStr, mercadoIdStr] = key.split('_');
+        const mercadoId = parseInt(mercadoIdStr);
+        const info = buracosPorProduto.get(parseInt(produtoIdStr));
+        if (!info) continue;
 
-      for (const sr of rpcResults) {
-        const { nome, nomeOriginal, mercadoId, encontrado } = sr;
-        const produto = produtos.find(p => p.nome === nome);
         const placeholderIdx = acc[mercadoId].produtos.findLastIndex(
-          (p: any) => p.naoEncontrado && p.nome === nome
+          (px: any) => px.naoEncontrado && px.nome === info.nomeOriginal
         );
         if (placeholderIdx < 0) continue;
         acc[mercadoId].produtos[placeholderIdx] = {
-          nome,
-          nomeEncontrado: encontrado.nome_produto,
+          nome: info.nomeOriginal,
+          nomeEncontrado: encontrado.nome,
           tipoBusca: 'trigram',
-          similarInfo: { nomeOriginal },
-          quantidade: produto?.quantidade || 1,
+          similarInfo: { nomeOriginal: info.resolved.nome },
+          quantidade: produtos.find(p => p.nome === info.nomeOriginal)?.quantidade || 1,
           precoUnitario: encontrado.preco,
-          subtotal: encontrado.preco * (produto?.quantidade || 1),
+          subtotal: encontrado.preco * (produtos.find(p => p.nome === info.nomeOriginal)?.quantidade || 1),
           naoEncontrado: false,
         };
         acc[mercadoId].itens++;
-        acc[mercadoId].total += encontrado.preco * (produto?.quantidade || 1);
+        acc[mercadoId].total += encontrado.preco * (produtos.find(p => p.nome === info.nomeOriginal)?.quantidade || 1);
       }
     }
 
