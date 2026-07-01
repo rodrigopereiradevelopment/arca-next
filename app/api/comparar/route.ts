@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
     const acc: Record<number, MercadoAcc> = {};
     for (const m of mercados) acc[m.id] = { total: 0, itens: 0, produtos: [] };
 
-    const produtosResolvidos: { produto: ProdutoItem; resolved: { id: number; nome: string; categoria_id: number | null } }[] = [];
+    const produtosResolvidos: { produto: ProdutoItem; resolved: { id: number; nome: string; categoria_id: number | null; peso_volume: string | null } }[] = [];
 
     for (const produto of produtos) {
       const quantidade = produto.quantidade || 1;
@@ -198,8 +198,8 @@ export async function POST(req: NextRequest) {
         const eqResults = await Promise.all(
           fallbackIds.map(async (fbId) => {
             const [a, b] = await Promise.all([
-              supabase.from("produtos_equivalentes").select("produto_id_b, score").eq("produto_id_a", fbId).gte("score", 0.3).order("score", { ascending: false }).limit(5),
-              supabase.from("produtos_equivalentes").select("produto_id_a, score").eq("produto_id_b", fbId).gte("score", 0.3).order("score", { ascending: false }).limit(5),
+              supabase.from("produtos_equivalentes").select("produto_id_b, score").eq("produto_id_a", fbId).gte("score", 0.3).order("score", { ascending: false }).limit(20),
+              supabase.from("produtos_equivalentes").select("produto_id_a, score").eq("produto_id_b", fbId).gte("score", 0.3).order("score", { ascending: false }).limit(20),
             ]);
             return { fbId, matchIds: [...new Set([...(a.data || []).map(x => x.produto_id_b), ...(b.data || []).map(x => x.produto_id_a)])] };
           })
@@ -295,6 +295,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Segunda passada: preencher fallbacks nos mercados faltantes
+      // Ordena equivalentes por: quem tem preco no mercado alvo primeiro, depois score
       for (const r of resultados) {
         for (const mercado of mercados) {
           const jaTem = acc[mercado.id].produtos.some(
@@ -302,8 +303,14 @@ export async function POST(req: NextRequest) {
           );
           if (jaTem) continue;
 
+          const similaresOrdenados = [...r.similares].sort((a, b) => {
+            const temA = similarPriceMap[`${a.id}_${mercado.id}`] ? 1 : 0;
+            const temB = similarPriceMap[`${b.id}_${mercado.id}`] ? 1 : 0;
+            return temB - temA;
+          });
+
           let encontrado = false;
-          for (const s of r.similares) {
+          for (const s of similaresOrdenados) {
             const preco = similarPriceMap[`${s.id}_${mercado.id}`];
             if (preco && preco > 0) {
               encontrado = true;
@@ -328,6 +335,61 @@ export async function POST(req: NextRequest) {
             }
           }
         }
+      }
+    }
+
+    // 4c. Slow path: trigram RPC pros buracos restantes
+    //     Só roda pra pares (produto, mercado) que ainda estão sem preço
+    const buracos: { produto: ProdutoItem; resolved: { id: number; nome: string; categoria_id: number | null; peso_volume: string | null }; mercadoId: number }[] = [];
+    for (const { produto, resolved } of produtosResolvidos) {
+      for (const mercado of mercados) {
+        const jaTem = acc[mercado.id].produtos.some(
+          (p: any) => p.nome === produto.nome && !p.naoEncontrado
+        );
+        if (!jaTem) {
+          buracos.push({ produto, resolved, mercadoId: mercado.id });
+        }
+      }
+    }
+
+    if (buracos.length > 0) {
+      const slowResults = await Promise.all(
+        buracos.map(async ({ produto, resolved, mercadoId }) => {
+          try {
+            const { data } = await supabase.rpc("buscar_produtos_similares", {
+              p_nome: resolved.nome,
+              p_categoria_id: resolved.categoria_id,
+              p_peso: resolved.peso_volume || null,
+              p_preco_ref: null,
+              p_mercado_id: mercadoId,
+              p_produto_id: resolved.id,
+            });
+            if (data && data.length > 0) {
+              return { produtoId: resolved.id, nomeOriginal: resolved.nome, mercadoId, encontrado: data[0] };
+            }
+          } catch { /* RPC pode timeoutar no free tier, ignora */ }
+          return null;
+        })
+      );
+
+      for (const sr of slowResults) {
+        if (!sr) continue;
+        const { nomeOriginal, mercadoId, encontrado } = sr;
+        const placeholderIdx = acc[mercadoId].produtos.findLastIndex(
+          (p: any) => p.nome === nomeOriginal && p.naoEncontrado
+        );
+        if (placeholderIdx < 0) continue;
+        acc[mercadoId].produtos[placeholderIdx] = {
+          nome: nomeOriginal,
+          nomeEncontrado: encontrado.nome_produto,
+          tipoBusca: 'trigram',
+          quantidade: 1,
+          precoUnitario: encontrado.preco,
+          subtotal: encontrado.preco,
+          naoEncontrado: false,
+        };
+        acc[mercadoId].itens++;
+        acc[mercadoId].total += encontrado.preco;
       }
     }
 
