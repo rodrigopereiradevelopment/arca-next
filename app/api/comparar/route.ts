@@ -59,16 +59,15 @@ export async function POST(req: NextRequest) {
       if (porId) for (const p of porId) resolvedMap[String(p.id)] = p;
     }
 
-    // Buscar por nome (tokenizado — AND por palavra, cobre variações tipo "FEIJAO CAMIL 500G" vs "FEIJAO PRETO CAMIL 500G")
+    // Buscar por nome (frase inteira com ILIKE + índice GIN)
     if (nomesUnicos.length > 0) {
       const resultados = await Promise.all(
         nomesUnicos.map(async (nome) => {
-          const palavras = nome.split(/\s+/).filter(p => p.length >= 2).slice(0, 5);
-          if (palavras.length === 0) return { nome, produto: null };
-
-          let query = supabase.from("produtos").select("id, nome, categoria_id, peso_volume");
-          for (const p of palavras) query = query.ilike("nome", `%${p}%`);
-          const { data } = await query.limit(1);
+          const { data } = await supabase
+            .from("produtos")
+            .select("id, nome, categoria_id, peso_volume")
+            .ilike("nome", `%${nome}%`)
+            .limit(1);
           return { nome, produto: data?.[0] || null };
         })
       );
