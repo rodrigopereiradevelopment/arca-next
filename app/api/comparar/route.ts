@@ -532,21 +532,33 @@ export async function POST(req: NextRequest) {
 
       for (const [, grupo] of grupos) {
         const excluirIds = new Set(grupo.produtos.map(p => p.produtoId));
-        const { data: todosCat } = await supabase
+        const palavrasGrupo = [...new Set(
+          grupo.produtos.flatMap(p =>
+            p.nome.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 4)
+          )
+        )];
+        if (palavrasGrupo.length === 0) continue;
+
+        const orConditions = palavrasGrupo
+          .slice(0, 8)
+          .map(w => `nome.ilike.%${w}%`)
+          .join(',');
+        const { data: catMatch } = await supabase
           .from("produtos")
           .select("id, nome")
           .eq("categoria_id", grupo.cat)
-          .limit(100);
+          .not("id", "in", `(${[...excluirIds].join(',')})`)
+          .or(orConditions)
+          .limit(50);
 
-        const catProdutos = (todosCat || []).filter(p => !excluirIds.has(p.id));
-        if (!catProdutos || catProdutos.length === 0) continue;
+        if (!catMatch || catMatch.length === 0) continue;
 
-        const idsCat = catProdutos.map(p => p.id);
-        const catNomeMap = new Map(catProdutos.map(p => [p.id, p.nome]));
+        const idsMatch = catMatch.map(p => p.id);
+        const catNomeMap = new Map(catMatch.map(p => [p.id, p.nome]));
         const { data: precosSub } = await supabase
           .from("precos")
           .select("produto_id, preco")
-          .in("produto_id", idsCat)
+          .in("produto_id", idsMatch)
           .eq("supermercado_id", grupo.mercadoId)
           .gte("data_coleta", diasLimite)
           .gt("preco", 0)
@@ -554,28 +566,18 @@ export async function POST(req: NextRequest) {
 
         if (!precosSub || precosSub.length === 0) continue;
 
-        const visto = new Set<number>();
-        const substitutos = precosSub.filter(p => {
-          if (visto.has(p.produto_id)) return false;
-          visto.add(p.produto_id);
-          return true;
-        });
-
         const usado = new Set<number>();
         for (const ps of grupo.produtos) {
           if (usado.has(ps.produtoId)) continue;
-          // Extrair palavras-chave do produto original (>=4 chars)
-          const palavrasOriginais = ps.nome.toUpperCase().split(/\s+/).filter(w => w.length >= 4);
+          const palavrasOriginais = ps.nome.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 4);
           if (palavrasOriginais.length === 0) continue;
 
-          // Encontrar o substituto mais barato que compartilhe pelo menos uma palavra
           let melhor: { id: number; nome: string; preco: number } | null = null;
-          for (const sub of substitutos) {
+          for (const sub of precosSub) {
             if (usado.has(sub.produto_id)) continue;
             const nomeSub = catNomeMap.get(sub.produto_id) || '';
             const palavrasSub = nomeSub.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 4);
-            const temPalavraComum = palavrasOriginais.some(w => palavrasSub.includes(w));
-            if (temPalavraComum) {
+            if (palavrasOriginais.some(w => palavrasSub.includes(w))) {
               melhor = { id: sub.produto_id, nome: nomeSub, preco: sub.preco };
               usado.add(sub.produto_id);
               break;
