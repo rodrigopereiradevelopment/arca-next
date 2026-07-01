@@ -440,6 +440,70 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 4d. Slow path camada 3: trigram RPC com indice GIN + filtro por mercado
+    //     Para pares (produto, mercado) que ainda ficaram sem preco
+    const buracosRestantes: { nome: string; nomeOriginal: string; produtoId: number; termo: string; mercadoId: number }[] = [];
+    for (const mercado of mercados) {
+      for (const p of acc[mercado.id].produtos) {
+        if (!p.naoEncontrado) continue;
+        const resolved = produtosResolvidos.find(r => r.produto.nome === p.nome);
+        if (!resolved) continue;
+        buracosRestantes.push({
+          nome: p.nome,
+          nomeOriginal: resolved.resolved.nome,
+          produtoId: resolved.resolved.id,
+          termo: resolved.resolved.nome,
+          mercadoId: mercado.id,
+        });
+      }
+    }
+
+    if (buracosRestantes.length > 0) {
+      const TRIGRAM_CONCORRENCIA = 15;
+
+      async function executarTrigrama(buraco: typeof buracosRestantes[0]) {
+        try {
+          const { data } = await supabase.rpc("buscar_trigram_mercado", {
+            p_termo: buraco.termo,
+            p_mercado_id: buraco.mercadoId,
+            p_excluir_id: buraco.produtoId,
+            p_limite: 3,
+          });
+          if (data && data.length > 0 && data[0].preco && data[0].preco > 0) {
+            return { ...buraco, encontrado: data[0] };
+          }
+        } catch { /* ignora timeout */ }
+        return null;
+      }
+
+      const trigramResults: { nome: string; nomeOriginal: string; produtoId: number; termo: string; mercadoId: number; encontrado: any }[] = [];
+      for (let i = 0; i < buracosRestantes.length; i += TRIGRAM_CONCORRENCIA) {
+        const batch = buracosRestantes.slice(i, i + TRIGRAM_CONCORRENCIA);
+        const results = await Promise.all(batch.map(executarTrigrama));
+        for (const r of results) { if (r) trigramResults.push(r); }
+      }
+
+      for (const sr of trigramResults) {
+        const { nome, nomeOriginal, mercadoId, encontrado } = sr;
+        const placeholderIdx = acc[mercadoId].produtos.findLastIndex(
+          (px: any) => px.naoEncontrado && px.nome === nome
+        );
+        if (placeholderIdx < 0) continue;
+        acc[mercadoId].produtos[placeholderIdx] = {
+          nome,
+          nomeEncontrado: encontrado.nome,
+          tipoBusca: 'trigram',
+          similarInfo: { nomeOriginal },
+          quantidade: produtos.find(p => p.nome === nome)?.quantidade || 1,
+          precoUnitario: encontrado.preco,
+          subtotal: encontrado.preco * (produtos.find(p => p.nome === nome)?.quantidade || 1),
+          naoEncontrado: false,
+        };
+        acc[mercadoId].itens++;
+        acc[mercadoId].total += encontrado.preco * (produtos.find(p => p.nome === nome)?.quantidade || 1);
+      }
+    }
+
     // ── 5. Montar resposta ────────────────────────────────────────────
     const resposta = mercados.map((m) => ({
       id: m.id,
