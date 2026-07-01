@@ -220,64 +220,29 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Fallback ILIKE progressivo — tenta com todas as palavras,
-      // depois relaxa se nao achar nada (remove filtro de categoria, depois menos palavras)
-      const precisamIlike = fallbacks.filter(f => !fallbackIdsComMatch.has(f.resolved.id));
-      async function buscarIlike(produto: { nome: string }, resolved: { id: number; nome: string; categoria_id: number | null }, palavras: string[]): Promise<{ id: number; nome: string }[]> {
-        if (palavras.length < 2) return [];
-        let q = supabase.from("produtos").select("id, nome").neq("id", resolved.id);
-        for (const p of palavras) q = q.ilike("nome", `%${p}%`);
-        const { data } = await q.limit(10);
-        if (data && data.length > 0) return data;
-
-        // Sem categoria: tenta sem filtro de categoria
-        let q2 = supabase.from("produtos").select("id, nome").neq("id", resolved.id);
-        for (const p of palavras) q2 = q2.ilike("nome", `%${p}%`);
-        const { data: d2 } = await q2.limit(10);
-        if (d2 && d2.length > 0) return d2;
-
-        // Ainda nada: tira a palavra mais curta
-        const menor = palavras.reduce((a, b) => a.length <= b.length ? a : b);
-        return buscarIlike(produto, resolved, palavras.filter(p => p !== menor));
-      }
-
-      if (precisamIlike.length > 0) {
+      // Fallback ILIKE — busca sem filtro de categoria (mais abrangente)
+      if (fallbacks.length > 0) {
+        const vistos = new Set<number>();
         const ilikeResults = await Promise.all(
-          precisamIlike.map(async ({ produto, resolved }) => {
-            const termo = (produto.nome || resolved.nome).trim().toUpperCase();
-            const palavras = termo.split(/\s+/).filter(p => p.length >= 2).slice(0, 4);
-            const similares = await buscarIlike(produto, resolved, palavras);
-            return { produtoId: resolved.id, nomeOriginal: resolved.nome, similares: similares.map(s => ({ id: s.id, nome: s.nome })) };
+          fallbacks.map(async (fb) => {
+            if (vistos.has(fb.resolved.id)) return null;
+            vistos.add(fb.resolved.id);
+            const termo = (fb.produto.nome || fb.resolved.nome).trim().toUpperCase();
+            const palavras = termo.split(/\s+/).filter(p => p.length >= 3).slice(0, 3);
+            if (palavras.length < 2) return null;
+
+            let q = supabase.from("produtos").select("id, nome").neq("id", fb.resolved.id);
+            for (const p of palavras) q = q.ilike("nome", `%${p}%`);
+            const { data } = await q.limit(10);
+            if (!data || data.length === 0) return null;
+
+            return { produtoId: fb.resolved.id, nomeOriginal: fb.resolved.nome, similares: data.map(s => ({ id: s.id, nome: s.nome })) };
           })
         );
         for (const r of ilikeResults) {
-          if (r.similares.length > 0) {
+          if (r && r.similares.length > 0) {
             resultados.push(r);
             for (const s of r.similares) similarIds.add(s.id);
-          }
-        }
-      }
-
-      // ILIKE adicional para produtos que ja tem equivalentes na tabela
-      // mas nenhum tem preco no mercado alvo
-      const comMatchSemPreco = fallbacks.filter(f => fallbackIdsComMatch.has(f.resolved.id));
-      if (comMatchSemPreco.length > 0) {
-        const extraIlike = await Promise.all(
-          comMatchSemPreco.map(async ({ produto, resolved }) => {
-            const termo = (produto.nome || resolved.nome).trim().toUpperCase();
-            const palavras = termo.split(/\s+/).filter(p => p.length >= 3).slice(0, 3);
-            const similares = await buscarIlike(produto, resolved, palavras);
-            return { produtoId: resolved.id, nomeOriginal: resolved.nome, similares: similares.map(s => ({ id: s.id, nome: s.nome })) };
-          })
-        );
-        for (const r of extraIlike) {
-          if (r.similares.length > 0) {
-            // So adiciona se nao existir ainda
-            const jaExiste = resultados.some(ex => ex.produtoId === r.produtoId);
-            if (!jaExiste) {
-              resultados.push(r);
-              for (const s of r.similares) similarIds.add(s.id);
-            }
           }
         }
       }
