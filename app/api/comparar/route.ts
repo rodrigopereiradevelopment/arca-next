@@ -189,32 +189,28 @@ export async function POST(req: NextRequest) {
     if (fallbacks.length > 0) {
       const fallbackIds = fallbacks.map(f => f.resolved.id);
 
-      // Tenta produtos_equivalentes primeiro (rápido, tabela pré-computada)
-      const [eqResA, eqResB] = await Promise.all([
-        supabase.from("produtos_equivalentes").select("produto_id_a, produto_id_b, score").in("produto_id_a", fallbackIds).gte("score", 0.3).order("score", { ascending: false }),
-        supabase.from("produtos_equivalentes").select("produto_id_a, produto_id_b, score").in("produto_id_b", fallbackIds).gte("score", 0.3).order("score", { ascending: false }),
-      ]);
-      const equivalentes = [...(eqResA.data || []), ...(eqResB.data || [])]
-        .sort((a, b) => (b.score || 0) - (a.score || 0));
-
+      // Busca equivalentes na tabela (individualmente, top 5 por produto)
+      // Evita o limite de 1000 linhas do PostgREST free tier
       const resultados: { produtoId: number; nomeOriginal: string; similares: { id: number; nome: string }[] }[] = [];
       const similarIds = new Set<number>();
-      const fallbackIdsComMatch = new Set<number>();
 
-      if (equivalentes) {
-        for (const fbId of fallbackIds) {
-          const matchIds = new Set<number>();
-          for (const e of equivalentes) {
-            if (e.produto_id_a === fbId) matchIds.add(e.produto_id_b);
-            if (e.produto_id_b === fbId) matchIds.add(e.produto_id_a);
-          }
-          if (matchIds.size > 0) {
-            fallbackIdsComMatch.add(fbId);
+      if (fallbackIds.length > 0) {
+        const eqResults = await Promise.all(
+          fallbackIds.map(async (fbId) => {
+            const [a, b] = await Promise.all([
+              supabase.from("produtos_equivalentes").select("produto_id_b, score").eq("produto_id_a", fbId).gte("score", 0.3).order("score", { ascending: false }).limit(5),
+              supabase.from("produtos_equivalentes").select("produto_id_a, score").eq("produto_id_b", fbId).gte("score", 0.3).order("score", { ascending: false }).limit(5),
+            ]);
+            return { fbId, matchIds: [...new Set([...(a.data || []).map(x => x.produto_id_b), ...(b.data || []).map(x => x.produto_id_a)])] };
+          })
+        );
+        for (const { fbId, matchIds } of eqResults) {
+          if (matchIds.length > 0) {
             for (const id of matchIds) similarIds.add(id);
             resultados.push({
               produtoId: fbId,
               nomeOriginal: fallbacks.find(f => f.resolved.id === fbId)?.resolved.nome || '',
-              similares: [...matchIds].map(id => ({ id, nome: '' })),
+              similares: matchIds.map(id => ({ id, nome: '' })),
             });
           }
         }
