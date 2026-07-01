@@ -504,6 +504,93 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 4e. Substituto por categoria: se nada achou, busca o mais barato
+    //     da mesma categoria com preco no mercado alvo
+    const precisaSubstituto: { nome: string; produtoId: number; categoria_id: number; mercadoId: number }[] = [];
+    for (const mercado of mercados) {
+      for (const p of acc[mercado.id].produtos) {
+        if (!p.naoEncontrado) continue;
+        const resolved = produtosResolvidos.find(r => r.produto.nome === p.nome);
+        if (!resolved || !resolved.resolved.categoria_id) continue;
+        precisaSubstituto.push({
+          nome: p.nome,
+          produtoId: resolved.resolved.id,
+          categoria_id: resolved.resolved.categoria_id,
+          mercadoId: mercado.id,
+        });
+      }
+    }
+
+    if (precisaSubstituto.length > 0) {
+      // Agrupar por (categoria, mercado) pra minimizar queries
+      const grupos = new Map<string, { cat: number; mercadoId: number; produtos: typeof precisaSubstituto }>();
+      for (const ps of precisaSubstituto) {
+        const key = `${ps.categoria_id}_${ps.mercadoId}`;
+        if (!grupos.has(key)) grupos.set(key, { cat: ps.categoria_id, mercadoId: ps.mercadoId, produtos: [] });
+        grupos.get(key)!.produtos.push(ps);
+      }
+
+      for (const [, grupo] of grupos) {
+        const excluirIds = [...new Set(grupo.produtos.map(p => p.produtoId))];
+        // Primeiro busca produtos da categoria, depois precos no mercado
+        const { data: catProdutos } = await supabase
+          .from("produtos")
+          .select("id, nome")
+          .eq("categoria_id", grupo.cat)
+          .not("id", "in", `(${excluirIds.join(",")})`)
+          .limit(50);
+
+        if (!catProdutos || catProdutos.length === 0) continue;
+
+        const idsCat = catProdutos.map(p => p.id);
+        const catNomeMap = new Map(catProdutos.map(p => [p.id, p.nome]));
+        const { data: precosSub } = await supabase
+          .from("precos")
+          .select("produto_id, preco")
+          .in("produto_id", idsCat)
+          .eq("supermercado_id", grupo.mercadoId)
+          .gte("data_coleta", diasLimite)
+          .gt("preco", 0)
+          .order("preco", { ascending: true });
+
+        if (!precosSub || precosSub.length === 0) continue;
+
+        const visto = new Set<number>();
+        const substitutos = precosSub.filter(p => {
+          if (visto.has(p.produto_id)) return false;
+          visto.add(p.produto_id);
+          return true;
+        });
+
+        const usado = new Set<number>();
+        for (const sub of substitutos) {
+          if (usado.has(sub.produto_id)) continue;
+          const produtoPendente = grupo.produtos.find(p => !usado.has(p.produtoId));
+          if (!produtoPendente) break;
+          usado.add(sub.produto_id);
+          usado.add(produtoPendente.produtoId);
+
+          const nomeProduto = catNomeMap.get(sub.produto_id) || '';
+          const placeholderIdx = acc[grupo.mercadoId].produtos.findLastIndex(
+            (px: any) => px.naoEncontrado && px.nome === produtoPendente.nome
+          );
+          if (placeholderIdx < 0) continue;
+
+          acc[grupo.mercadoId].produtos[placeholderIdx] = {
+            nome: produtoPendente.nome,
+            nomeEncontrado: nomeProduto,
+            tipoBusca: 'substituto',
+            quantidade: produtos.find(p => p.nome === produtoPendente.nome)?.quantidade || 1,
+            precoUnitario: sub.preco,
+            subtotal: sub.preco * (produtos.find(p => p.nome === produtoPendente.nome)?.quantidade || 1),
+            naoEncontrado: false,
+          };
+          acc[grupo.mercadoId].itens++;
+          acc[grupo.mercadoId].total += sub.preco * (produtos.find(p => p.nome === produtoPendente.nome)?.quantidade || 1);
+        }
+      }
+    }
+
     // ── 5. Montar resposta ────────────────────────────────────────────
     const resposta = mercados.map((m) => ({
       id: m.id,
