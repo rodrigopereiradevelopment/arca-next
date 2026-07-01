@@ -537,73 +537,127 @@ export async function POST(req: NextRequest) {
             p.nome.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 4)
           )
         )];
-        if (palavrasGrupo.length === 0) continue;
 
-        const orConditions = palavrasGrupo
-          .slice(0, 8)
-          .map(w => `nome.ilike.%${w}%`)
-          .join(',');
+        // ── 4a. Keyword + categoria (substituto preciso) ────────────────
+        if (palavrasGrupo.length > 0) {
+          const orConditions = palavrasGrupo
+            .slice(0, 8)
+            .map(w => `nome.ilike.%${w}%`)
+            .join(',');
+          const { data: catTodos } = await supabase
+            .from("produtos")
+            .select("id, nome")
+            .eq("categoria_id", grupo.cat)
+            .or(orConditions)
+            .limit(50);
+
+          const catMatch = (catTodos || []).filter(p => !excluirIds.has(p.id));
+
+          if (catMatch.length > 0) {
+            const idsMatch = catMatch.map(p => p.id);
+            const catNomeMap = new Map(catMatch.map(p => [p.id, p.nome]));
+            const { data: precosSub } = await supabase
+              .from("precos")
+              .select("produto_id, preco")
+              .in("produto_id", idsMatch)
+              .eq("supermercado_id", grupo.mercadoId)
+              .gte("data_coleta", diasLimite)
+              .gt("preco", 0)
+              .order("preco", { ascending: true });
+
+            if (precosSub && precosSub.length > 0) {
+              const usado = new Set<number>();
+              for (const ps of grupo.produtos) {
+                if (usado.has(ps.produtoId)) continue;
+                const palavras = ps.nome.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 4);
+                if (palavras.length === 0) continue;
+
+                let melhor: { id: number; nome: string; preco: number } | null = null;
+                for (const sub of precosSub) {
+                  if (usado.has(sub.produto_id)) continue;
+                  const nomeSub = catNomeMap.get(sub.produto_id) || '';
+                  const pSub = nomeSub.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 4);
+                  if (palavras.some(w => pSub.includes(w))) {
+                    melhor = { id: sub.produto_id, nome: nomeSub, preco: sub.preco };
+                    usado.add(sub.produto_id);
+                    break;
+                  }
+                }
+                if (!melhor) continue;
+                usado.add(ps.produtoId);
+                const idx = acc[ps.mercadoId].produtos.findLastIndex(
+                  (px: any) => px.naoEncontrado && px.nome === ps.nome
+                );
+                if (idx < 0) continue;
+                acc[ps.mercadoId].produtos[idx] = {
+                  nome: ps.nome, nomeEncontrado: melhor.nome, tipoBusca: 'substituto',
+                  quantidade: produtos.find(p => p.nome === ps.nome)?.quantidade || 1,
+                  precoUnitario: melhor.preco, subtotal: melhor.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1),
+                  naoEncontrado: false,
+                };
+                acc[ps.mercadoId].itens++;
+                acc[ps.mercadoId].total += melhor.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1);
+              }
+            }
+          }
+        }
+
+        // ── 4b. Fallback: mais barato da categoria (substituto amplo) ──
+        const pendentes = grupo.produtos.filter(p =>
+          acc[p.mercadoId].produtos.some((px: any) => px.naoEncontrado && px.nome === p.nome)
+        );
+        if (pendentes.length === 0) continue;
+
         const { data: catTodos } = await supabase
           .from("produtos")
           .select("id, nome")
           .eq("categoria_id", grupo.cat)
-          .or(orConditions)
-          .limit(50);
+          .limit(100);
 
-        const catMatch = (catTodos || []).filter(p => !excluirIds.has(p.id));
+        const catFiltrados = (catTodos || []).filter(p => !excluirIds.has(p.id));
+        if (catFiltrados.length === 0) continue;
 
-        if (!catMatch || catMatch.length === 0) continue;
-
-        const idsMatch = catMatch.map(p => p.id);
-        const catNomeMap = new Map(catMatch.map(p => [p.id, p.nome]));
-        const { data: precosSub } = await supabase
+        const idsCat = catFiltrados.map(p => p.id);
+        const catNomeMap = new Map(catFiltrados.map(p => [p.id, p.nome]));
+        const { data: precosFallback } = await supabase
           .from("precos")
           .select("produto_id, preco")
-          .in("produto_id", idsMatch)
+          .in("produto_id", idsCat)
           .eq("supermercado_id", grupo.mercadoId)
           .gte("data_coleta", diasLimite)
           .gt("preco", 0)
           .order("preco", { ascending: true });
 
-        if (!precosSub || precosSub.length === 0) continue;
+        if (!precosFallback || precosFallback.length === 0) continue;
+
+        const visto = new Set<number>();
+        const baratos = precosFallback.filter(p => {
+          if (visto.has(p.produto_id)) return false;
+          visto.add(p.produto_id);
+          return true;
+        });
 
         const usado = new Set<number>();
-        for (const ps of grupo.produtos) {
+        for (const ps of pendentes) {
           if (usado.has(ps.produtoId)) continue;
-          const palavrasOriginais = ps.nome.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 4);
-          if (palavrasOriginais.length === 0) continue;
-
-          let melhor: { id: number; nome: string; preco: number } | null = null;
-          for (const sub of precosSub) {
-            if (usado.has(sub.produto_id)) continue;
-            const nomeSub = catNomeMap.get(sub.produto_id) || '';
-            const palavrasSub = nomeSub.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 4);
-            if (palavrasOriginais.some(w => palavrasSub.includes(w))) {
-              melhor = { id: sub.produto_id, nome: nomeSub, preco: sub.preco };
-              usado.add(sub.produto_id);
-              break;
-            }
-          }
-
-          if (!melhor) continue;
+          const sub = baratos.find(s => !usado.has(s.produto_id));
+          if (!sub) { usado.add(ps.produtoId); continue; }
+          usado.add(sub.produto_id);
           usado.add(ps.produtoId);
 
-          const placeholderIdx = acc[ps.mercadoId].produtos.findLastIndex(
+          const idx = acc[ps.mercadoId].produtos.findLastIndex(
             (px: any) => px.naoEncontrado && px.nome === ps.nome
           );
-          if (placeholderIdx < 0) continue;
-
-          acc[ps.mercadoId].produtos[placeholderIdx] = {
-            nome: ps.nome,
-            nomeEncontrado: melhor.nome,
-            tipoBusca: 'substituto',
+          if (idx < 0) continue;
+          acc[ps.mercadoId].produtos[idx] = {
+            nome: ps.nome, nomeEncontrado: catNomeMap.get(sub.produto_id) || '',
+            tipoBusca: 'substituto_amplo',
             quantidade: produtos.find(p => p.nome === ps.nome)?.quantidade || 1,
-            precoUnitario: melhor.preco,
-            subtotal: melhor.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1),
+            precoUnitario: sub.preco, subtotal: sub.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1),
             naoEncontrado: false,
           };
           acc[ps.mercadoId].itens++;
-          acc[ps.mercadoId].total += melhor.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1);
+          acc[ps.mercadoId].total += sub.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1);
         }
       }
     }
