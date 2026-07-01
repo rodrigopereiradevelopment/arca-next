@@ -338,61 +338,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4c. Slow path: trigram RPC pros buracos restantes
-    //     Só roda pra pares (produto, mercado) que ainda estão sem preço
-    const buracos: { produto: ProdutoItem; resolved: { id: number; nome: string; categoria_id: number | null; peso_volume: string | null }; mercadoId: number }[] = [];
-    for (const { produto, resolved } of produtosResolvidos) {
-      for (const mercado of mercados) {
-        const jaTem = acc[mercado.id].produtos.some(
-          (p: any) => p.nome === produto.nome && !p.naoEncontrado
-        );
-        if (!jaTem) {
-          buracos.push({ produto, resolved, mercadoId: mercado.id });
-        }
-      }
-    }
-
-    if (buracos.length > 0) {
-      const slowResults = await Promise.all(
-        buracos.map(async ({ produto, resolved, mercadoId }) => {
-          try {
-            const { data } = await supabase.rpc("buscar_produtos_similares", {
-              p_nome: resolved.nome,
-              p_categoria_id: resolved.categoria_id,
-              p_peso: resolved.peso_volume || null,
-              p_preco_ref: null,
-              p_mercado_id: mercadoId,
-              p_produto_id: resolved.id,
-            });
-            if (data && data.length > 0) {
-              return { produtoId: resolved.id, nomeOriginal: resolved.nome, mercadoId, encontrado: data[0] };
-            }
-          } catch { /* RPC pode timeoutar no free tier, ignora */ }
-          return null;
-        })
-      );
-
-      for (const sr of slowResults) {
-        if (!sr) continue;
-        const { nomeOriginal, mercadoId, encontrado } = sr;
-        const placeholderIdx = acc[mercadoId].produtos.findLastIndex(
-          (p: any) => p.nome === nomeOriginal && p.naoEncontrado
-        );
-        if (placeholderIdx < 0) continue;
-        acc[mercadoId].produtos[placeholderIdx] = {
-          nome: nomeOriginal,
-          nomeEncontrado: encontrado.nome_produto,
-          tipoBusca: 'trigram',
-          quantidade: 1,
-          precoUnitario: encontrado.preco,
-          subtotal: encontrado.preco,
-          naoEncontrado: false,
-        };
-        acc[mercadoId].itens++;
-        acc[mercadoId].total += encontrado.preco;
-      }
-    }
-
     // ── 5. Montar resposta ────────────────────────────────────────────
     const resposta = mercados.map((m) => ({
       id: m.id,
