@@ -220,17 +220,13 @@ export async function POST(req: NextRequest) {
       // depois relaxa (sem categoria, menos palavras) ate achar algo
       async function buscarIlike(resolved: { id: number; nome: string }, palavras: string[]): Promise<{ id: number; nome: string }[]> {
         if (palavras.length < 2) return [];
-        for (let n = palavras.length; n >= 2; n--) {
-          const combo = palavras.slice(0, n);
-          let q = supabase.from("produtos").select("id, nome").neq("id", resolved.id);
-          for (const p of combo) q = q.ilike("nome", `%${p}%`);
-          const { data } = await q.limit(10);
-          if (data && data.length > 0) return data;
-        }
-        // Ultimo recurso: so a palavra mais longa
+        let q = supabase.from("produtos").select("id, nome").neq("id", resolved.id);
+        for (const p of palavras) q = q.ilike("nome", `%${p}%`);
+        const { data } = await q.limit(10);
+        if (data && data.length > 0) return data;
         const maior = palavras.reduce((a, b) => a.length >= b.length ? a : b);
-        const { data } = await supabase.from("produtos").select("id, nome").neq("id", resolved.id).ilike("nome", `%${maior}%`).limit(10);
-        return data || [];
+        const { data: d2 } = await supabase.from("produtos").select("id, nome").neq("id", resolved.id).ilike("nome", `%${maior}%`).limit(10);
+        return d2 || [];
       }
 
       if (fallbacks.length > 0) {
@@ -355,62 +351,71 @@ export async function POST(req: NextRequest) {
 
     if (buracosPorProduto.size > 0) {
       const slowResults: Map<string, { id: number; nome: string; preco: number }> = new Map();
+      const entries = [...buracosPorProduto.entries()];
+      const CONCORRENCIA = 10;
 
-      for (const [produtoId, info] of buracosPorProduto) {
-        const termo = info.resolved.nome.trim().toUpperCase();
-        const palavras = termo.split(/\s+/).filter(w => w.length >= 3).slice(0, 5);
-        if (palavras.length < 2) continue;
+      const foundCandidates = new Map<number, { id: number; nome: string }[]>();
 
-        let candidatos: { id: number; nome: string }[] = [];
-        for (let n = palavras.length; n >= 2; n--) {
-          const combo = palavras.slice(0, n);
-          let q = supabase.from("produtos").select("id, nome").neq("id", produtoId);
-          for (const w of combo) q = q.ilike("nome", `%${w}%`);
-          const { data } = await q.limit(20);
-          if (data && data.length > 0) { candidatos = data; break; }
-        }
-        if (candidatos.length === 0) {
+      for (let i = 0; i < entries.length; i += CONCORRENCIA) {
+        const batch = entries.slice(i, i + CONCORRENCIA);
+        const batchResults = await Promise.all(batch.map(async ([produtoId, info]) => {
+          const termo = info.resolved.nome.trim().toUpperCase();
+          const palavras = termo.split(/\s+/).filter(w => w.length >= 3).slice(0, 5);
+          if (palavras.length < 2) return { produtoId, candidatos: [] };
+
+          for (let n = palavras.length; n >= 2; n--) {
+            const combo = palavras.slice(0, n);
+            let q = supabase.from("produtos").select("id, nome").neq("id", produtoId);
+            for (const w of combo) q = q.ilike("nome", `%${w}%`);
+            const { data } = await q.limit(20);
+            if (data && data.length > 0) return { produtoId, candidatos: data };
+          }
+
           const maior = palavras.reduce((a, b) => a.length >= b.length ? a : b);
           const { data } = await supabase.from("produtos").select("id, nome").neq("id", produtoId).ilike("nome", `%${maior}%`).limit(20);
-          if (data) candidatos = data;
-        }
-        if (candidatos.length === 0) continue;
+          return { produtoId, candidatos: data || [] };
+        }));
 
-        // Buscar precos em todos os mercados de uma vez
-        const ids = candidatos.map(x => x.id);
+        for (const r of batchResults) {
+          if (r.candidatos.length > 0) foundCandidates.set(r.produtoId, r.candidatos);
+        }
+      }
+
+      const allCandidateIds = [...new Set([...foundCandidates.values()].flatMap(c => c.map(x => x.id)))];
+      if (allCandidateIds.length > 0) {
         const { data: precosCandidatos } = await supabase
           .from("precos")
           .select("produto_id, supermercado_id, preco")
-          .in("produto_id", ids)
+          .in("produto_id", allCandidateIds)
           .gte("data_coleta", diasLimite);
-        if (!precosCandidatos || precosCandidatos.length === 0) continue;
 
-        // Agrupar precos por supermercado_id
-        const precosPorMercado: Record<number, Map<number, number>> = {};
-        for (const pc of precosCandidatos) {
-          if (!precosPorMercado[pc.supermercado_id]) precosPorMercado[pc.supermercado_id] = new Map();
-          if (!precosPorMercado[pc.supermercado_id].has(pc.produto_id)) {
-            precosPorMercado[pc.supermercado_id].set(pc.produto_id, pc.preco);
-          }
-        }
-
-        // Para cada candidato, verificar se existe em cada mercado que precisa
-        for (const cand of candidatos) {
-          for (const mercado of mercados) {
-            const key = `${produtoId}_${mercado.id}`;
-            if (slowResults.has(key)) continue;
-            const preco = precosPorMercado[mercado.id]?.get(cand.id);
-            if (preco && preco > 0) {
-              // Verificar se este produto ainda esta sem preco neste mercado
-              const temPlaceholder = acc[mercado.id].produtos.some(
-                (px: any) => px.naoEncontrado && px.nome === info.nomeOriginal
-              );
-              if (temPlaceholder) {
-                slowResults.set(key, { id: cand.id, nome: cand.nome, preco });
-              }
+        if (precosCandidatos && precosCandidatos.length > 0) {
+          const precosPorMercado: Record<number, Map<number, number>> = {};
+          for (const pc of precosCandidatos) {
+            if (!precosPorMercado[pc.supermercado_id]) precosPorMercado[pc.supermercado_id] = new Map();
+            if (!precosPorMercado[pc.supermercado_id].has(pc.produto_id)) {
+              precosPorMercado[pc.supermercado_id].set(pc.produto_id, pc.preco);
             }
           }
-          if (slowResults.size >= buracosPorProduto.size * mercados.length) break;
+
+          for (const [produtoId, candidatos] of foundCandidates) {
+            for (const cand of candidatos) {
+              for (const mercado of mercados) {
+                const key = `${produtoId}_${mercado.id}`;
+                if (slowResults.has(key)) continue;
+                const preco = precosPorMercado[mercado.id]?.get(cand.id);
+                if (preco && preco > 0) {
+                  const temPlaceholder = acc[mercado.id].produtos.some(
+                    (px: any) => px.naoEncontrado && px.nome === buracosPorProduto.get(produtoId)?.nomeOriginal
+                  );
+                  if (temPlaceholder) {
+                    slowResults.set(key, { id: cand.id, nome: cand.nome, preco });
+                  }
+                }
+              }
+              if (slowResults.size >= entries.length * mercados.length) break;
+            }
+          }
         }
       }
 
@@ -459,7 +464,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (buracosRestantes.length > 0) {
-      const TRIGRAM_CONCORRENCIA = 15;
+      const TRIGRAM_CONCORRENCIA = 30;
 
       async function executarTrigrama(buraco: typeof buracosRestantes[0]) {
         try {
