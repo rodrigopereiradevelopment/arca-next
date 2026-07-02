@@ -40,19 +40,28 @@ export async function PUT(
     const { data: { user }, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !user) return corsErr("Usuario nao autenticado", 401);
 
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const isMod = profile?.role === "admin" || profile?.role === "moderador";
+
     const { status } = body;
     if (!status) return corsErr("status obrigatorio", 400);
 
     const statusValidos = ["aberto", "analise", "resolvido"];
     if (!statusValidos.includes(status)) return corsErr("status invalido", 400);
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("tickets")
       .update({ status, updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .eq("user_id", user.id)
-      .select()
-      .single();
+      .eq("id", id);
+
+    if (!isMod) query = query.eq("user_id", user.id);
+
+    const { data, error } = await query.select().single();
 
     if (error) return corsErr(error.message, 500);
     if (!data) return corsErr("Ticket nao encontrado", 404);

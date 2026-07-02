@@ -36,15 +36,29 @@ export async function GET(req: NextRequest) {
     const { data: { user }, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !user) return corsErr("Usuario nao autenticado", 401);
 
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const isMod = profile?.role === "admin" || profile?.role === "moderador";
+
     const { searchParams } = new URL(req.url);
     const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
     const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") || "20")));
     const offset = (page - 1) * limit;
 
-    const { data, error, count } = await supabase
+    let query = supabase
       .from("tickets")
-      .select("*", { count: "exact" })
-      .eq("user_id", user.id)
+      .select("*", { count: "exact" });
+
+    if (!isMod) query = query.eq("user_id", user.id);
+
+    const filter = searchParams.get("status");
+    if (isMod && filter) query = query.eq("status", filter);
+
+    const { data, error, count } = await query
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
 
