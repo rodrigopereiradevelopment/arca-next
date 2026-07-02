@@ -320,7 +320,7 @@ export async function POST(req: NextRequest) {
                   nome: fallbacks.find(f => f.resolved.id === r.produtoId)?.produto.nome,
                   nomeEncontrado: s.nome,
                   tipoBusca: 'similar',
-                  similarInfo: { nomeOriginal: r.nomeOriginal },
+                  similarInfo: { nomeOriginal: r.nomeOriginal, motivo: 'equivalente' },
                   quantidade: fallbacks.find(f => f.resolved.id === r.produtoId)?.produto.quantidade || 1,
                   precoUnitario: preco,
                   subtotal: preco * (fallbacks.find(f => f.resolved.id === r.produtoId)?.produto.quantidade || 1),
@@ -433,8 +433,8 @@ export async function POST(req: NextRequest) {
         acc[mercadoId].produtos[placeholderIdx] = {
           nome: info.nomeOriginal,
           nomeEncontrado: encontrado.nome,
-          tipoBusca: 'trigram',
-          similarInfo: { nomeOriginal: info.resolved.nome },
+          tipoBusca: 'similar',
+          similarInfo: { nomeOriginal: info.resolved.nome, motivo: 'trigram' },
           quantidade: produtos.find(p => p.nome === info.nomeOriginal)?.quantidade || 1,
           precoUnitario: encontrado.preco,
           subtotal: encontrado.preco * (produtos.find(p => p.nome === info.nomeOriginal)?.quantidade || 1),
@@ -497,8 +497,8 @@ export async function POST(req: NextRequest) {
         acc[mercadoId].produtos[placeholderIdx] = {
           nome,
           nomeEncontrado: encontrado.nome,
-          tipoBusca: 'trigram',
-          similarInfo: { nomeOriginal },
+          tipoBusca: 'similar',
+          similarInfo: { nomeOriginal, motivo: 'trigram' },
           quantidade: produtos.find(p => p.nome === nome)?.quantidade || 1,
           precoUnitario: encontrado.preco,
           subtotal: encontrado.preco * (produtos.find(p => p.nome === nome)?.quantidade || 1),
@@ -596,6 +596,7 @@ export async function POST(req: NextRequest) {
                 if (idx < 0) continue;
                 acc[ps.mercadoId].produtos[idx] = {
                   nome: ps.nome, nomeEncontrado: melhor.nome, tipoBusca: 'substituto',
+                  similarInfo: { nomeOriginal: melhor.nome, motivo: 'substituto' },
                   quantidade: produtos.find(p => p.nome === ps.nome)?.quantidade || 1,
                   precoUnitario: melhor.preco, subtotal: melhor.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1),
                   naoEncontrado: false,
@@ -650,6 +651,7 @@ export async function POST(req: NextRequest) {
           acc[ps.mercadoId].produtos[idx] = {
             nome: ps.nome, nomeEncontrado: ((sub as any).produtos?.nome || ''),
             tipoBusca: 'substituto_amplo',
+            similarInfo: { nomeOriginal: ((sub as any).produtos?.nome || ''), motivo: 'substituto_amplo' },
             quantidade: produtos.find(p => p.nome === ps.nome)?.quantidade || 1,
             precoUnitario: sub.preco, subtotal: sub.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1),
             naoEncontrado: false,
