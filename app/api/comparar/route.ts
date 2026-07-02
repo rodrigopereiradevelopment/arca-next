@@ -622,11 +622,19 @@ export async function POST(req: NextRequest) {
         if (precosValidos.length === 0) continue;
 
         const usado = new Set<number>();
-        let subIdx = 0;
         for (const ps of pendentes) {
           if (usado.has(ps.produtoId)) continue;
-          if (subIdx >= precosValidos.length) { usado.add(ps.produtoId); continue; }
-          const sub = precosValidos[subIdx++];
+          const palavras = ps.nome.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 4);
+          if (palavras.length === 0) continue;
+
+          const sub = precosValidos.find(s => {
+            if (usado.has(s.produto_id)) return false;
+            const nomeSub = ((s as any).produtos?.nome || '').toUpperCase();
+            const pSub = nomeSub.split(/\s+/).filter((w: string) => w.length >= 4);
+            return palavras.some(w => pSub.includes(w));
+          });
+
+          if (!sub) { usado.add(ps.produtoId); continue; }
           usado.add(sub.produto_id);
           usado.add(ps.produtoId);
 
@@ -635,7 +643,7 @@ export async function POST(req: NextRequest) {
           );
           if (idx < 0) continue;
           acc[ps.mercadoId].produtos[idx] = {
-            nome: ps.nome, nomeEncontrado: (sub.produtos as any)?.nome || '',
+            nome: ps.nome, nomeEncontrado: ((sub as any).produtos?.nome || ''),
             tipoBusca: 'substituto_amplo',
             quantidade: produtos.find(p => p.nome === ps.nome)?.quantidade || 1,
             precoUnitario: sub.preco, subtotal: sub.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1),
