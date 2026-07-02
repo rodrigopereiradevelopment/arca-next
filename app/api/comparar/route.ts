@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ sucesso: false, erro: "Nenhum produto enviado" }, { status: 400, headers: CORS_HEADERS });
     }
 
-    const MAX_PRODUTOS = 10;
+    const MAX_PRODUTOS = 20;
     if (produtos.length > MAX_PRODUTOS) {
       return NextResponse.json(
         { sucesso: false, erro: `Máximo de ${MAX_PRODUTOS} produtos por comparação. Você enviou ${produtos.length}.` },
