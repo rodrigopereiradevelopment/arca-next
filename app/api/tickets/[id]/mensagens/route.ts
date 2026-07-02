@@ -71,19 +71,24 @@ export async function POST(
     const { texto } = body;
     if (!texto || !texto.trim()) return corsErr("texto obrigatorio", 400);
 
-    const { data: ticket } = await supabase
-      .from("tickets")
-      .select("id, status")
-      .eq("id", id)
-      .eq("user_id", user.id)
-      .single();
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+    const isMod = profile?.role === "admin" || profile?.role === "moderador";
+
+    const query = supabase.from("tickets").select("id, status").eq("id", id);
+    if (!isMod) query.eq("user_id", user.id);
+    const { data: ticket } = await query.single();
 
     if (!ticket) return corsErr("Ticket nao encontrado", 404);
     if (ticket.status === "resolvido") return corsErr("Ticket ja resolvido", 400);
 
+    const autor = isMod ? "suporte" : "usuario";
     const { data, error } = await supabase
       .from("tickets_mensagens")
-      .insert({ ticket_id: parseInt(id), autor: "usuario", texto: texto.trim() })
+      .insert({ ticket_id: parseInt(id), autor, texto: texto.trim() })
       .select()
       .single();
 
