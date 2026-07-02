@@ -19,6 +19,44 @@ interface ProdutoItem {
   quantidade: number;
 }
 
+const BLOCKLIST_FOOD = ['GATO', 'CACHORRO', 'PET', 'RACAO', 'CAPELLETI', 'LASANHA', 'NUGGET', 'PETISCO'];
+const ANCHOR_BLOCKLIST: Record<string, string[]> = {
+  'ARROZ': ['VINAGRE', 'EXTRATO', 'MOLHO', 'TEMPERO', 'SOPA'],
+  'FEIJAO': ['VINAGRE', 'EXTRATO', 'MOLHO', 'SOPA', 'DOCE'],
+  'MACARRAO': ['VINAGRE', 'EXTRATO', 'SOPA'],
+  'SABAO': ['CIF', 'DETERGENTE', 'GEL', 'AMACIANTE'],
+};
+
+function isSubstitutoValido(nomeOriginal: string, nomeSubstituto: string): boolean {
+  const orig = nomeOriginal.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 3);
+  const sub = nomeSubstituto.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 3);
+  if (orig.length === 0 || sub.length === 0) return false;
+
+  const anchor = orig[0];
+
+  // Âncora deve estar presente no substituto
+  if (!sub.some((t: string) => t === anchor || t.includes(anchor) || anchor.includes(t))) return false;
+
+  // Exigir 2+ palavras em comum
+  const comuns = orig.filter((w: string) => sub.some((s: string) => s.includes(w) || w.includes(s)));
+  if (comuns.length < 2) return false;
+
+  // Blocklist geral
+  for (const b of BLOCKLIST_FOOD) {
+    if (sub.some((t: string) => t.includes(b))) return false;
+  }
+
+  // Blocklist por âncora
+  const specific = ANCHOR_BLOCKLIST[anchor];
+  if (specific) {
+    for (const b of specific) {
+      if (sub.some((t: string) => t.includes(b))) return false;
+    }
+  }
+
+  return true;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { produtos } = await req.json() as { produtos: ProdutoItem[] };
@@ -581,8 +619,7 @@ export async function POST(req: NextRequest) {
                 for (const sub of precosSub) {
                   if (usado.has(sub.produto_id)) continue;
                   const nomeSub = catNomeMap.get(sub.produto_id) || '';
-                  const pSub = nomeSub.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 4);
-                  if (palavras.some(w => pSub.includes(w))) {
+                  if (isSubstitutoValido(ps.nome, nomeSub)) {
                     melhor = { id: sub.produto_id, nome: nomeSub, preco: sub.preco };
                     usado.add(sub.produto_id);
                     break;
@@ -635,9 +672,8 @@ export async function POST(req: NextRequest) {
 
           const sub = precosValidos.find(s => {
             if (usado.has(s.produto_id)) return false;
-            const nomeSub = ((s as any).produtos?.nome || '').toUpperCase();
-            const pSub = nomeSub.split(/\s+/).filter((w: string) => w.length >= 4);
-            return palavras.some(w => pSub.includes(w));
+            const nomeSub = ((s as any).produtos?.nome || '');
+            return isSubstitutoValido(ps.nome, nomeSub);
           });
 
           if (!sub) { usado.add(ps.produtoId); continue; }
@@ -658,6 +694,20 @@ export async function POST(req: NextRequest) {
           };
           acc[ps.mercadoId].itens++;
           acc[ps.mercadoId].total += sub.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1);
+        }
+      }
+    }
+
+    // ── 4f. Pós-processamento: remover similarInfo se nome for igual ──
+    //     Evita mostrar "Similar" pra produtos com match exato
+    for (const mercado of mercados) {
+      for (const p of acc[mercado.id].produtos) {
+        if (p.naoEncontrado || !p.similarInfo) continue;
+        if (p.nome === p.nomeEncontrado || p.nome === p.similarInfo?.nomeOriginal) {
+          delete p.similarInfo;
+          if (p.tipoBusca === 'similar' || p.tipoBusca === 'trigram' || p.tipoBusca === 'equivalente') {
+            p.tipoBusca = 'nome';
+          }
         }
       }
     }
