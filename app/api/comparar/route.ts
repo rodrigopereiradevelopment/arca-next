@@ -581,8 +581,15 @@ export async function POST(req: NextRequest) {
         )];
 
         // ── 4a. Keyword + categoria (substituto preciso) ────────────────
-        if (palavrasGrupo.length > 0) {
-          const orConditions = palavrasGrupo
+        // Busca pela âncora (1ª palavra forte) de cada produto
+        // Antes usava TODAS as palavras + limit 50 — perdia bons candidatos
+        const anchors = [...new Set(
+          grupo.produtos.map(p =>
+            (p.nome.toUpperCase().split(/\s+/).find((w: string) => w.length >= 3) || '')
+          ).filter(Boolean)
+        )];
+        if (anchors.length > 0) {
+          const orConditions = anchors
             .slice(0, 8)
             .map(w => `nome.ilike.%${w}%`)
             .join(',');
@@ -591,7 +598,7 @@ export async function POST(req: NextRequest) {
             .select("id, nome")
             .eq("categoria_id", grupo.cat)
             .or(orConditions)
-            .limit(50);
+            .limit(200);
 
           const catMatch = (catTodos || []).filter(p => !excluirIds.has(p.id));
 
