@@ -680,7 +680,12 @@ export async function POST(req: NextRequest) {
       produtos: acc[m.id].produtos,
     }));
 
+    // Ordena: mais completo primeiro, depois menor preço
+    // (20/20 antes de 19/20, etc. — mercado incompleto não compete)
     resposta.sort((a, b) => {
+      if (a.itensEncontrados !== b.itensEncontrados) {
+        return b.itensEncontrados - a.itensEncontrados;
+      }
       if (a.total === 0) return 1;
       if (b.total === 0) return -1;
       return a.total - b.total;
