@@ -34,12 +34,11 @@ function isSubstitutoValido(nomeOriginal: string, nomeSubstituto: string): boole
 
   const anchor = orig[0];
 
-  // Âncora deve estar presente no substituto
-  if (!sub.some((t: string) => t === anchor || t.includes(anchor) || anchor.includes(t))) return false;
-
-  // Exigir 2+ palavras em comum
-  const comuns = orig.filter((w: string) => sub.some((s: string) => s.includes(w) || w.includes(s)));
-  if (comuns.length < 2) return false;
+  // Âncora deve estar entre as 2 primeiras palavras do substituto
+  // ARROZ Camil → ARROZ Tio João: OK (pos 0)
+  // ARROZ Camil → VINAGRE DE ARROZ: rejeita (pos 2)
+  const posAnchor = sub.findIndex((t: string) => t === anchor || t.includes(anchor) || anchor.includes(t));
+  if (posAnchor < 0 || posAnchor > 1) return false;
 
   // Blocklist geral
   for (const b of BLOCKLIST_FOOD) {
@@ -645,56 +644,8 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // ── 4b. Fallback: mais barato da categoria (substituto amplo) ──
-        const pendentes = grupo.produtos.filter(p =>
-          acc[p.mercadoId].produtos.some((px: any) => px.naoEncontrado && px.nome === p.nome)
-        );
-        if (pendentes.length === 0) continue;
-
-        const { data: baratos } = await supabase
-          .from("precos")
-          .select("produto_id, preco, produtos!inner(id, nome)")
-          .eq("produtos.categoria_id", grupo.cat)
-          .eq("supermercado_id", grupo.mercadoId)
-          .gte("data_coleta", diasLimite)
-          .gt("preco", 0)
-          .order("preco", { ascending: true })
-          .limit(10);
-
-        const precosValidos = (baratos || []).filter(p => !excluirIds.has(p.produto_id));
-        if (precosValidos.length === 0) continue;
-
-        const usado = new Set<number>();
-        for (const ps of pendentes) {
-          if (usado.has(ps.produtoId)) continue;
-          const palavras = ps.nome.toUpperCase().split(/\s+/).filter((w: string) => w.length >= 4);
-          if (palavras.length === 0) continue;
-
-          const sub = precosValidos.find(s => {
-            if (usado.has(s.produto_id)) return false;
-            const nomeSub = ((s as any).produtos?.nome || '');
-            return isSubstitutoValido(ps.nome, nomeSub);
-          });
-
-          if (!sub) { usado.add(ps.produtoId); continue; }
-          usado.add(sub.produto_id);
-          usado.add(ps.produtoId);
-
-          const idx = acc[ps.mercadoId].produtos.findLastIndex(
-            (px: any) => px.naoEncontrado && px.nome === ps.nome
-          );
-          if (idx < 0) continue;
-          acc[ps.mercadoId].produtos[idx] = {
-            nome: ps.nome, nomeEncontrado: ((sub as any).produtos?.nome || ''),
-            tipoBusca: 'substituto_amplo',
-            similarInfo: { nomeOriginal: ((sub as any).produtos?.nome || ''), motivo: 'substituto_amplo' },
-            quantidade: produtos.find(p => p.nome === ps.nome)?.quantidade || 1,
-            precoUnitario: sub.preco, subtotal: sub.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1),
-            naoEncontrado: false,
-          };
-          acc[ps.mercadoId].itens++;
-          acc[ps.mercadoId].total += sub.preco * (produtos.find(p => p.nome === ps.nome)?.quantidade || 1);
-        }
+        // ── 4b. Substituto amplo DESLIGADO — gera mais erro que acerto
+        //     Melhor "não encontrado" honesto do que CIF no lugar de Sabão
       }
     }
 
