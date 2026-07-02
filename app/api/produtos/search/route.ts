@@ -33,12 +33,21 @@ export async function GET(req: NextRequest) {
     }
 
     if (q && q.length >= 2) {
-      const { data: produtos, error: err1 } = await supabase
+      const tokens = q.split(/\s+/).filter(t => t.length >= 2);
+      let queryProd = supabase
         .from("produtos")
         .select("id, nome, marca, peso_volume, imagem_url, categoria_id")
-        .eq("ativo", true)
-        .or(`nome.ilike.*${q}*,nome.ilike.${q}*`)
-        .limit(limit + 1);
+        .eq("ativo", true);
+
+      if (tokens.length === 0) {
+        queryProd = queryProd.or(`nome.ilike.*${q}*,nome.ilike.${q}*`);
+      } else {
+        for (const token of tokens) {
+          queryProd = queryProd.ilike("nome", `*${token}*`);
+        }
+      }
+
+      const { data: produtos, error: err1 } = await queryProd.limit(limit + 1);
 
       if (err1) throw err1;
 
