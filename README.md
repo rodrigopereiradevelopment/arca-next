@@ -4,7 +4,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-green?logo=supabase)](https://supabase.com)
-![Version](https://img.shields.io/badge/version-1.2.0-green)
+![Version](https://img.shields.io/badge/version-1.2.1-green)
 
 API backend do ecossistema **ARCA** — ponte entre o banco de dados (Supabase/MongoDB) e o aplicativo mobile. Gerencia catálogo de produtos, preços, mercados, usuários, autenticação, notificações, tickets, upload e mais.
 
@@ -416,6 +416,16 @@ TCC — ETEC Pedro Ferreira Alves — Mogi Mirim/SP — 2025/2026
 ---
 
 ## 📋 Changelog
+
+### v1.2.1 (02/jul/2026)
+- **Filtro substitutos**: âncora na posição 0-1 (primeira palavra forte do produto deve estar nas 2 primeiras do substituto)
+- **Blocklists**: ARROZ rejeita VINAGRE/EXTRATO/MOLHO, SABAO rejeita CIF/DETERGENTE/GEL
+- **Substituto_amplo desligado**: zero falsos positivos (antes: vinagre/gato/CIF em todos mercados)
+- **Busca por âncora**: OR query usa só a primeira palavra, não todas — evita limit(50) truncar bons candidatos
+- **Ordenação por completeza**: mercados ordenados por itens encontrados primeiro, depois preço
+- **nomeEncontrado na API**: `ProdutoDetalhe.nomeEncontrado` exposto no response do comparar
+- **Motivo nos similares**: `similarInfo.motivo` em todas as camadas (equivalente/trigram/substituto)
+- **Imagens quebradas**: 6.711 produtos com `imagem_url` de domínio morto limpos para `null`
 
 ### v1.2.0 (29/jun/2026)
 - **Search otimizado**: substitui RPC `buscar_produtos` (trigram timeout 57014) por ILIKE direto com índice GIN — de timeout 3s+ para ~120ms
