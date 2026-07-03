@@ -6,6 +6,7 @@ export const runtime = "edge";
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim();
   const categoriaId = req.nextUrl.searchParams.get("categoria_id");
+  const supermercadoId = req.nextUrl.searchParams.get("supermercado_id");
   const page = Math.max(1, parseInt(req.nextUrl.searchParams.get("page") ?? "1"));
   const limit = Math.min(50, Math.max(1, parseInt(req.nextUrl.searchParams.get("limit") ?? "15")));
   const from = (page - 1) * limit;
@@ -15,13 +16,17 @@ export async function GET(req: NextRequest) {
     const supabase = getSupabaseServerClient();
 
     if ((!q || q.length < 2) && categoriaId) {
-      const { data, error } = await supabase
+      let query = supabase
         .from("produtos")
         .select("*, precos!inner(preco, supermercado_id, data_coleta)")
         .eq("categoria_id", parseInt(categoriaId))
-        .eq("ativo", true)
-        .order("created_at", { ascending: false })
-        .range(from, to);
+        .eq("ativo", true);
+
+      if (supermercadoId) {
+        query = query.eq("precos.supermercado_id", parseInt(supermercadoId));
+      }
+
+      const { data, error } = await query.order("created_at", { ascending: false }).range(from, to);
 
       if (error) throw error;
 
@@ -113,7 +118,22 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      const data = produtos.map(p => ({
+      // Filtra por mercado quando especificado
+      let idsFiltrados = ids;
+      if (supermercadoId) {
+        const smId = parseInt(supermercadoId);
+        idsFiltrados = ids.filter(id => {
+          const precosProd = precoPorProduto.get(id);
+          return precosProd?.some(p => p.supermercado_id === smId);
+        });
+        if (idsFiltrados.length === 0) {
+          return NextResponse.json({ data: [], temMais: false, page, limit });
+        }
+      }
+
+      const data = produtos
+        .filter(p => idsFiltrados.includes(p.id))
+        .map(p => ({
         id: p.id,
         nome: p.nome,
         marca: p.marca,
