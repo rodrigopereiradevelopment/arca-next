@@ -5,7 +5,7 @@ const VERSAO_ATUAL = {
   versionCode: 21,
   url: "",
   obrigatorio: false,
-  mensagem: "Comparação chunked (listas grandes), busca paralela, filtro por mercado!",
+  mensagem: "Correção: download do APK via CapacitorHttp nativo (sem CORS)!",
 };
 VERSAO_ATUAL.url = `https://github.com/rodrigopereiradevelopment/arca-ionic/releases/download/v${VERSAO_ATUAL.versao}/arca-v${VERSAO_ATUAL.versao}.apk`;
 
