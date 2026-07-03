@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
 
     const admin = await getMercadoAdmin(token);
     if (!admin) return corsErr("Sem permissão", 403);
+    if (admin.mercadoId === 0) return corsErr("Admin não pode importar sem mercado vinculado", 400);
 
     const body = await req.json();
     const { linhas } = body;
