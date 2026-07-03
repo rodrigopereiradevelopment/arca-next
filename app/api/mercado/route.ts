@@ -32,6 +32,14 @@ export async function GET(req: NextRequest) {
 
     const admin = await getMercadoAdmin(token);
     if (!admin) return corsErr("Sem permissão de mercado_admin", 403);
+    if (admin.mercadoId === 0) {
+      return corsOk({
+        mercado: { id: 0, nome: "Visualização Admin", logo_url: "", status: "—", cidade: "—", responsavel: "" },
+        totalProdutos: 0,
+        precosAtivos: 0,
+        atualizacoesRecentes: [],
+      });
+    }
 
     const supabase = getSupabaseServerClient();
 

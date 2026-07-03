@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
 
     const admin = await getMercadoAdmin(token);
     if (!admin) return corsErr("Sem permissão", 403);
+    if (admin.mercadoId === 0) return corsErr("Admin sem mercado vinculado", 400);
 
     const supabase = getSupabaseServerClient();
     const params = req.nextUrl.searchParams;
@@ -84,6 +85,8 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const { acao, produtoId, preco, promocao, descricaoPromocao } = body;
+
+    if (admin.mercadoId === 0) return corsErr("Admin sem mercado vinculado", 400);
 
     if (!produtoId) return corsErr("produtoId obrigatório", 400);
 

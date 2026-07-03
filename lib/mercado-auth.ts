@@ -18,7 +18,14 @@ export async function getMercadoAdmin(token: string): Promise<MercadoAdminInfo |
       .eq("id", user.id)
       .maybeSingle();
 
-    if (!profile || profile.role !== "mercado_admin" || !profile.mercado_id) {
+    if (!profile) return null;
+
+    // Admin pode ver o portal; mercado_admin precisa ter mercado_id
+    if (profile.role === "admin") {
+      return { userId: user.id, mercadoId: profile.mercado_id || 0, role: "admin" };
+    }
+
+    if (profile.role !== "mercado_admin" || !profile.mercado_id) {
       return null;
     }
 
