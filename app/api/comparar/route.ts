@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/db/supabase";
+import { cacheGet, cacheSet, makeCacheKey } from "@/lib/redis";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,10 @@ export async function POST(req: NextRequest) {
         { status: 400, headers: CORS_HEADERS }
       );
     }
+
+    const cacheKey = makeCacheKey("comparar", produtos);
+    const cacheHit = await cacheGet<object>(cacheKey);
+    if (cacheHit) return NextResponse.json(cacheHit, { headers: CORS_HEADERS });
 
     const supabase = getSupabaseServerClient();
 
@@ -691,11 +696,13 @@ export async function POST(req: NextRequest) {
       return a.total - b.total;
     });
 
-    return NextResponse.json({
+    const responseData = {
       sucesso: true,
       mercados: resposta,
       totalProdutos: produtos.length,
-    }, { headers: CORS_HEADERS });
+    };
+    await cacheSet(cacheKey, responseData, 300);
+    return NextResponse.json(responseData, { headers: CORS_HEADERS });
 
   } catch (error) {
     console.error("Erro no comparador:", error);
