@@ -296,16 +296,6 @@ arca-next/
 │   └── api/
 │       ├── auth/
 │       │   ├── login/route.ts
-│       │   ├── cadastro/route.ts
-│       │   ├── logout/route.ts
-│       │   ├── esqueci-senha/route.ts
-│       │   ├── redefinir-senha/route.ts
-│       │   ├── deletar-conta/route.ts
-│       │   ├── perfil/route.ts
-│       │   ├── enderecos/route.ts
-│       │   └── alterar-senha/route.ts
-│       ├── auth/
-│       │   ├── login/route.ts
 │       │   ├── login-token/route.ts
 │       │   ├── cadastro/route.ts
 │       │   ├── logout/route.ts
@@ -414,23 +404,5 @@ TCC — ETEC Pedro Ferreira Alves — Mogi Mirim/SP — 2025/2026
 **Orientador:** Prof. Maurício Aparecido das Neves
 
 ---
-
-## 📋 Changelog
-
-### v1.2.1 (02/jul/2026)
-- **Filtro substitutos**: âncora na posição 0-1 (primeira palavra forte do produto deve estar nas 2 primeiras do substituto)
-- **Blocklists**: ARROZ rejeita VINAGRE/EXTRATO/MOLHO, SABAO rejeita CIF/DETERGENTE/GEL
-- **Substituto_amplo desligado**: zero falsos positivos (antes: vinagre/gato/CIF em todos mercados)
-- **Busca por âncora**: OR query usa só a primeira palavra, não todas — evita limit(50) truncar bons candidatos
-- **Ordenação por completeza**: mercados ordenados por itens encontrados primeiro, depois preço
-- **nomeEncontrado na API**: `ProdutoDetalhe.nomeEncontrado` exposto no response do comparar
-- **Motivo nos similares**: `similarInfo.motivo` em todas as camadas (equivalente/trigram/substituto)
-- **Imagens quebradas**: 6.711 produtos com `imagem_url` de domínio morto limpos para `null`
-
-### v1.2.0 (29/jun/2026)
-- **Search otimizado**: substitui RPC `buscar_produtos` (trigram timeout 57014) por ILIKE direto com índice GIN — de timeout 3s+ para ~120ms
-- **Preços no search**: corrige array `precos[]` vazio no response da busca
-- **Comparação acelerada**: fallback de similar substituído de RPC `buscar_produtos_similares` (1 chamada por mercado) para ILIKE tokenizado (1 chamada por produto) + cache de preços — de ~40s para ~380ms
-- **Fallback tokenizado**: busca por palavras-chave AND (`ILIKE %FEIJAO% AND %CAMIL%`) em vez de frase completa, achando variações e abreviações
 
 📝 **Licença:** MIT
