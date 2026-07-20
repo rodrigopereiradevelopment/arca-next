@@ -9,7 +9,6 @@
 API backend do ecossistema **ARCA** — ponte entre o banco de dados (Supabase/MongoDB) e o aplicativo mobile. Gerencia catálogo de produtos, preços, mercados, usuários, autenticação, notificações, tickets, upload e mais.
 
 > 📱 **App Mobile:** [arca-ionic](https://github.com/rodrigopereiradevelopment/arca-ionic) — https://arca-ionic.vercel.app
-> 🕷️ **Scraper:** [arca-scraper](https://github.com/rodrigopereiradevelopment/arca-scraper)
 > 🌐 **API Produção:** https://arca-next.vercel.app
 
 ---
@@ -17,13 +16,11 @@ API backend do ecossistema **ARCA** — ponte entre o banco de dados (Supabase/M
 ## 🏗️ Arquitetura
 
 ```
-arca-scraper (Python)
-       ↓
-MongoDB Atlas (Bronze) → ETL → Supabase PostgreSQL (Gold)
-                                        ↓
-                              arca-next (Vercel) ← ESTE REPO
-                                        ↓
-                              arca-ionic (App Mobile)
+Supabase PostgreSQL (Gold)
+        ↓
+arca-next (Vercel) ← ESTE REPO
+        ↓
+arca-ionic (App Mobile)
 ```
 
 - **Supabase HTTP** — todas as rotas usam `getSupabaseServerClient()` diretamente
